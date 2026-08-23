@@ -31,6 +31,14 @@ jobs:
         run: npm install --prefix backend --omit=dev
 
       - name: Build and publish installer
-        run: npm run build -- --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build -- --publish never
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/Tavora Setup *.exe
+            dist/Tavora Setup *.exe.blockmap
+            dist/latest.yml

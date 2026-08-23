@@ -90,11 +90,8 @@ const shouldGroupMessage = (messages, index) => {
   const currentAuthor = String(current?.authorId?._id || current?.authorId || '');
   const previousType = previous?.type || (previous?.isPrivate ? 'private' : 'server');
   const currentType = current?.type || (current?.isPrivate ? 'private' : 'server');
-  const previousConversation = String(previous?.conversationId || previous?.channelId || '');
-  const currentConversation = String(current?.conversationId || current?.channelId || '');
   return previousAuthor && previousAuthor === currentAuthor
     && previousType === currentType
-    && previousConversation === currentConversation
     && new Date(current.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60 * 1000;
 };
 
