@@ -531,7 +531,7 @@ export default function AppHomePage() {
 
   useEffect(() => {
     if (!user) return undefined;
-    const socket = io(API_URL, { transports: ['websocket'] });
+    const socket = io(API_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: 8, timeout: 10000 });
     const currentUserId = String(user._id || user.id || '');
     socket.on('connect', () => socket.emit('private:join', { userId: currentUserId }));
     socket.on('private:message', async ({ message, sender }) => {
@@ -746,7 +746,7 @@ export default function AppHomePage() {
       if (initiator) peer.createOffer().then((offer) => peer.setLocalDescription(offer).then(() => socket.emit('voice:signal', { targetSocketId: participant.socketId, signal: { description: peer.localDescription } }))).catch(() => {});
       return peer;
     };
-    socket.on('connect', () => socket.emit('voice:join', { serverId: selectedServer.id, channelId: activeVoiceChannelId, user: { id: user?._id || user?.id, username: user?.username, displayName: user?.displayName, avatarUrl: user?.avatarUrl } }));
+    socket.on('connect', () => { setVoiceError(''); socket.emit('voice:join', { serverId: selectedServer.id, channelId: activeVoiceChannelId, user: { id: user?._id || user?.id, username: user?.username, displayName: user?.displayName, avatarUrl: user?.avatarUrl } }); });
     socket.on('voice:participants', (participants) => { setVoiceParticipants([...new Map(participants.map((participant) => [String(participant.userId), { ...participant, id: participant.userId, name: participant.displayName, isSelf: String(participant.userId) === String(user?._id || user?.id) }])).values()]); participants.filter((participant) => String(participant.userId) !== String(user?._id || user?.id)).forEach((participant) => createPeer(participant, false)); });
     socket.on('voice:peer-joined', (participant) => createPeer(participant, true));
     socket.on('voice:signal', async ({ fromSocketId, signal }) => {
