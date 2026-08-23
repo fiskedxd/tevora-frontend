@@ -1,40 +1,57 @@
 {
-  "name": "frontend",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "name": "tavora-desktop",
+  "version": "1.0.0",
+  "description": "Tavora desktop application",
+  "main": "electron/main.cjs",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "framer-motion": "^12.42.2",
-    "highlight.js": "^11.12.0",
-    "lucide-react": "^1.24.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "react-markdown": "^10.1.0",
-    "react-router-dom": "^7.18.1",
-    "rehype-highlight": "^7.0.2",
-    "rehype-raw": "^7.0.0",
-    "rehype-sanitize": "^6.0.0",
-    "remark-gfm": "^4.0.1",
-    "socket.io-client": "^4.8.3"
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "dev": "concurrently -k \"npm run dev --prefix frontend\" \"npm run dev --prefix backend\" \"wait-on http://localhost:5173 && electron . --dev\"",
+    "build:frontend": "npm run build --prefix frontend",
+    "build": "npm run build:frontend && electron-builder --win",
+    "release": "npm run build -- --publish always",
+    "start": "electron ."
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
-    "autoprefixer": "^10.5.2",
-    "eslint": "^10.6.0",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.3",
-    "globals": "^17.7.0",
-    "postcss": "^8.5.18",
-    "tailwindcss": "^3.4.17",
-    "vite": "^8.1.1"
+    "concurrently": "^9.2.1",
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12",
+    "electron-updater": "^6.6.2",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.tavora.desktop",
+    "productName": "Tavora",
+    "publish": { "provider": "github", "owner": "fiskedxd", "repo": "tevora-frontend", "releaseType": "release" },
+    "files": [
+      "electron/**/*",
+      "backend/**/*",
+      "frontend/dist/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "backend/**/*",
+      "frontend/public/musiques/**/*",
+      "frontend/public/covers/**/*",
+      "frontend/public/playlist-covers/**/*",
+      "frontend/public/playlist-banners/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "frontend/public/tevora.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tavora",
+      "installerSidebar": "build/installer/sidebar.bmp",
+      "installerHeader": "build/installer/header.bmp"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }
