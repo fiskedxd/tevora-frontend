@@ -41,6 +41,7 @@ export default function WorkspaceSidebar({
   onFriendRequestDecision,
   canManageChannels = false,
   onCreateChannel,
+  onCreateCategory,
   onEditChannel,
   onDeleteChannel,
   className = '',
@@ -136,7 +137,7 @@ export default function WorkspaceSidebar({
               <section key={category.id} className="mb-6">
                 <div className="mb-2 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/30">
                   <span>{category.name}</span>
-                  {canManageChannels ? <button type="button" onClick={() => onCreateChannel?.(category.id)} className="rounded p-0.5 text-white/30 transition hover:bg-white/10 hover:text-white" title="Créer un salon"><Plus size={13} /></button> : null}
+                  {canManageChannels ? <button type="button" onClick={() => onCreateCategory?.()} className="rounded p-0.5 text-white/30 transition hover:bg-white/10 hover:text-white" title="Créer une catégorie"><Plus size={13} /></button> : null}
                 </div>
                 <div className="space-y-1">
                   {(category.channels || []).map((channel) => {

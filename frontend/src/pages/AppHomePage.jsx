@@ -1618,14 +1618,15 @@ export default function AppHomePage() {
   const saveChannel = async (draft) => {
     if (!selectedServer?.id || !canManageChannels) return;
     setChannelManager((current) => ({ ...current, busy: true, error: '' }));
+    const isCategory = channelManager.mode === 'category';
     const editing = channelManager.mode === 'edit';
-    const endpoint = editing ? `${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channelManager.channel.id)}` : `${API_URL}/api/social/servers/${selectedServer.id}/channels`;
+    const endpoint = isCategory ? `${API_URL}/api/social/servers/${selectedServer.id}/categories` : editing ? `${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channelManager.channel.id)}` : `${API_URL}/api/social/servers/${selectedServer.id}/channels`;
     const response = await fetch(endpoint, { method: editing ? 'PUT' : 'POST', headers: getAuthHeaders(), body: JSON.stringify(draft) });
     const data = await readJsonResponse(response);
     if (!response.ok) { setChannelManager((current) => ({ ...current, busy: false, error: data.message || 'Impossible de sauvegarder le salon.' })); return; }
     applyServerStructure(data.server.structure);
     setChannelManager({ open: false });
-    setMessage(editing ? 'Salon modifié.' : 'Salon créé.');
+    setMessage(isCategory ? 'Catégorie créée.' : editing ? 'Salon modifié.' : 'Salon créé.');
   };
 
   const openProfileModal = async (profileUser = null, isSelfProfile = false) => {
@@ -1957,6 +1958,7 @@ export default function AppHomePage() {
           onFriendRequestDecision={handleFriendRequestDecision}
           canManageChannels={canManageChannels}
           onCreateChannel={createChannel}
+          onCreateCategory={() => setChannelManager({ open: true, mode: 'category', channel: null, categoryId: '', error: '', busy: false })}
           onEditChannel={editChannel}
           onDeleteChannel={deleteChannel}
         />
