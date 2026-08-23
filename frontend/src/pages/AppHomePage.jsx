@@ -9,6 +9,7 @@ import RoleSettingsPanel from '../components/RoleSettingsPanel';
 import ServerBannerEditor from '../components/ServerBannerEditor';
 import ProfileBadges from '../components/ProfileBadges';
 import DesktopActivityManager from '../components/DesktopActivityManager';
+import ChannelManagerModal from '../components/ChannelManagerModal';
 import { MessageMarkdown, MessageComposer } from '../components/MessageMarkdown';
 import { motion, AnimatePresence } from 'framer-motion';
 import { io } from 'socket.io-client';
@@ -316,6 +317,7 @@ export default function AppHomePage() {
   const [draftName, setDraftName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [message, setMessage] = useState('');
+  const [channelManager, setChannelManager] = useState({ open: false, mode: 'create', channel: null, categoryId: '', error: '', busy: false });
   const [selectedServer, setSelectedServer] = useState(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isServerModalOpen, setIsServerModalOpen] = useState(false);
@@ -1592,42 +1594,38 @@ export default function AppHomePage() {
     setServers((current) => current.map((server) => server.id === nextServer.id ? { ...server, structure } : server));
   };
 
-  const createChannel = async (categoryId) => {
+  const createChannel = (categoryId, duplicateChannel = null) => {
     if (!selectedServer?.id || !canManageChannels) return;
-    const name = window.prompt('Nom du salon');
-    if (!name?.trim()) return;
-    const type = window.prompt('Type du salon : text ou voice', 'text')?.toLowerCase() === 'voice' ? 'voice' : 'text';
-    const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels`, {
-      method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ name: name.trim(), type, categoryId }),
-    });
-    const data = await readJsonResponse(response);
-    if (!response.ok) { setMessage(data.message || 'Impossible de créer le salon.'); return; }
-    applyServerStructure(data.server.structure);
-    setMessage('Salon créé.');
+    setChannelManager({ open: true, mode: 'create', channel: duplicateChannel ? { ...duplicateChannel, name: `${duplicateChannel.name}-copie` } : null, categoryId, error: '', busy: false });
   };
 
-  const editChannel = async (channel, categoryId) => {
+  const editChannel = (channel, categoryId) => {
     if (!selectedServer?.id || !canManageChannels) return;
-    const action = window.prompt(`Salon « ${channel.name} » : renommer ou supprimer`, channel.name);
-    if (action === null) return;
-    if (action.trim().toLowerCase() === 'supprimer') {
-      if (!window.confirm(`Supprimer le salon « ${channel.name} » ?`)) return;
-      const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channel.id)}`, { method: 'DELETE', headers: getAuthHeaders() });
-      const data = await readJsonResponse(response);
-      if (!response.ok) { setMessage(data.message || 'Impossible de supprimer le salon.'); return; }
-      applyServerStructure(data.server.structure);
-      if (activeChannelId === channel.id) navigate(`/server/${selectedServer.id}`);
-      setMessage('Salon supprimé.');
-      return;
-    }
-    if (!action.trim()) return;
-    const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channel.id)}`, {
-      method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify({ name: action.trim(), categoryId }),
-    });
+    setChannelManager({ open: true, mode: 'edit', channel: { ...channel, categoryId }, categoryId, error: '', busy: false });
+  };
+
+  const deleteChannel = async (channel) => {
+    if (!selectedServer?.id || !canManageChannels || !window.confirm(`Supprimer « ${channel.name} » ? Cette action est définitive.`)) return;
+    const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channel.id)}`, { method: 'DELETE', headers: getAuthHeaders() });
     const data = await readJsonResponse(response);
-    if (!response.ok) { setMessage(data.message || 'Impossible de modifier le salon.'); return; }
+    if (!response.ok) { setMessage(data.message || 'Impossible de supprimer le salon.'); return; }
     applyServerStructure(data.server.structure);
-    setMessage('Salon modifié.');
+    setChannelManager({ open: false });
+    if (activeChannelId === channel.id) navigate(`/server/${selectedServer.id}`);
+    setMessage('Salon supprimé.');
+  };
+
+  const saveChannel = async (draft) => {
+    if (!selectedServer?.id || !canManageChannels) return;
+    setChannelManager((current) => ({ ...current, busy: true, error: '' }));
+    const editing = channelManager.mode === 'edit';
+    const endpoint = editing ? `${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channelManager.channel.id)}` : `${API_URL}/api/social/servers/${selectedServer.id}/channels`;
+    const response = await fetch(endpoint, { method: editing ? 'PUT' : 'POST', headers: getAuthHeaders(), body: JSON.stringify(draft) });
+    const data = await readJsonResponse(response);
+    if (!response.ok) { setChannelManager((current) => ({ ...current, busy: false, error: data.message || 'Impossible de sauvegarder le salon.' })); return; }
+    applyServerStructure(data.server.structure);
+    setChannelManager({ open: false });
+    setMessage(editing ? 'Salon modifié.' : 'Salon créé.');
   };
 
   const openProfileModal = async (profileUser = null, isSelfProfile = false) => {
@@ -1960,6 +1958,7 @@ export default function AppHomePage() {
           canManageChannels={canManageChannels}
           onCreateChannel={createChannel}
           onEditChannel={editChannel}
+          onDeleteChannel={deleteChannel}
         />
 
         {false ? (
@@ -2411,6 +2410,19 @@ export default function AppHomePage() {
           )}
         </main>
       </div>
+
+      <ChannelManagerModal
+        open={channelManager.open}
+        mode={channelManager.mode}
+        channel={channelManager.channel}
+        categories={selectedServer?.structure?.categories || []}
+        defaultCategoryId={channelManager.categoryId}
+        busy={channelManager.busy}
+        error={channelManager.error}
+        onClose={() => setChannelManager({ open: false })}
+        onSubmit={saveChannel}
+        onDelete={() => deleteChannel(channelManager.channel)}
+      />
 
       <AnimatePresence>
         {isServerModalOpen && (

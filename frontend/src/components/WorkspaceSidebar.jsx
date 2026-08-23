@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, Copy, Hash, Home, Link2, MessageSquare, Plus, Search, Settings2, User, UserPlus, Users, Volume2 } from 'lucide-react';
+import { Bell, ChevronDown, Copy, Hash, Home, Link2, MessageSquare, MoreHorizontal, Plus, Search, Settings2, User, UserPlus, Users, Volume2 } from 'lucide-react';
 
 const ServerIcon = ({ server }) => {
   const [failed, setFailed] = React.useState(false);
@@ -48,6 +48,7 @@ export default function WorkspaceSidebar({
   const [isServerMenuOpen, setIsServerMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [bannerFailed, setBannerFailed] = useState(false);
+  const [channelMenu, setChannelMenu] = useState(null);
   const serverMenuRef = useRef(null);
   const categories = selectedServer?.structure?.categories || [];
   const filteredFriends = friends.filter((friend) => {
@@ -58,7 +59,16 @@ export default function WorkspaceSidebar({
   useEffect(() => {
     setBannerFailed(false);
     setIsServerMenuOpen(false);
+    setChannelMenu(null);
   }, [selectedServer?.id, selectedServer?.bannerUrl]);
+
+  useEffect(() => {
+    if (!channelMenu) return undefined;
+    const close = () => setChannelMenu(null);
+    document.addEventListener('mousedown', close);
+    window.addEventListener('blur', close);
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('blur', close); };
+  }, [channelMenu]);
 
   useEffect(() => {
     if (!isServerMenuOpen) return undefined;
@@ -131,12 +141,9 @@ export default function WorkspaceSidebar({
                 <div className="space-y-1">
                   {(category.channels || []).map((channel) => {
                     const active = String(activeChannelId) === String(channel.id);
-                    return (
-                      <button key={channel.id} type="button" onClick={() => onOpenChannel(channel.id)} onContextMenu={(event) => { if (!canManageChannels) return; event.preventDefault(); onEditChannel?.(channel, category.id); }} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${active ? 'bg-white/[0.10] text-white shadow-[inset_2px_0_0_#9bdcff]' : 'text-white/45 hover:bg-white/[0.045] hover:text-white/80'}`} title={canManageChannels ? 'Clic droit pour modifier ou supprimer' : undefined}>
-                        {channel.type === 'voice' ? <Volume2 size={16} /> : <Hash size={16} />}
-                        <span className="truncate">{channel.name}</span>
-                      </button>
-                    );
+                    return <div key={channel.id} className="relative"><button type="button" onClick={() => onOpenChannel(channel.id)} onContextMenu={(event) => { if (!canManageChannels) return; event.preventDefault(); setChannelMenu({ channel, categoryId, x: Math.min(event.clientX, window.innerWidth - 220), y: Math.min(event.clientY, window.innerHeight - 180) }); }} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${active ? 'bg-white/[0.10] text-white shadow-[inset_2px_0_0_#9bdcff]' : 'text-white/45 hover:bg-white/[0.045] hover:text-white/80'}`} title={canManageChannels ? 'Clic droit pour gérer le salon' : undefined}>
+                      {channel.type === 'voice' ? <Volume2 size={16} /> : <Hash size={16} />}<span className="truncate">{channel.name}</span>{canManageChannels ? <MoreHorizontal size={14} className="ml-auto text-white/20" /> : null}
+                    </button>{channelMenu?.channel.id === channel.id ? <div className="fixed z-[100] w-52 rounded-lg border border-white/10 bg-[#111118] p-1 shadow-2xl" style={{ left: channelMenu.x, top: channelMenu.y }} onMouseDown={(event) => event.stopPropagation()}><button type="button" onClick={() => { setChannelMenu(null); onEditChannel?.(channel, category.id); }} className="block w-full rounded-md px-3 py-2 text-left text-xs text-white/75 hover:bg-white/10">Modifier le salon</button><button type="button" onClick={() => { setChannelMenu(null); onCreateChannel?.(category.id, channel); }} className="block w-full rounded-md px-3 py-2 text-left text-xs text-white/75 hover:bg-white/10">Dupliquer le salon</button><button type="button" onClick={() => { setChannelMenu(null); onEditChannel?.(channel, category.id, true); }} className="block w-full rounded-md px-3 py-2 text-left text-xs text-white/75 hover:bg-white/10">Gérer les permissions</button><div className="my-1 border-t border-white/10" /><button type="button" onClick={() => { setChannelMenu(null); onDeleteChannel?.(channel); }} className="block w-full rounded-md px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-400/10">Supprimer le salon</button></div> : null}</div>;
                   })}
                 </div>
               </section>
