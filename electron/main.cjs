@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Notification, dialog, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, Notification, dialog, ipcMain, Menu, session } = require('electron');
 const path = require('node:path');
 const { fork } = require('node:child_process');
 const { autoUpdater } = require('electron-updater');
@@ -55,6 +55,10 @@ async function createWindow() {
 app.whenReady().then(async () => {
   app.setAppUserModelId('com.tavora.desktop');
   Menu.setApplicationMenu(null);
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(['media', 'microphone', 'camera', 'notifications'].includes(permission));
+  });
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => ['media', 'microphone', 'camera', 'notifications'].includes(permission));
   ipcMain.handle('activity:detect', () => detectApplications());
   ipcMain.handle('window:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
   ipcMain.handle('window:toggle-maximize', (event) => {

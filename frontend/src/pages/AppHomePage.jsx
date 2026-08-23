@@ -560,7 +560,7 @@ export default function AppHomePage() {
 
   useEffect(() => {
     if (!user || !selectedServer?.id) return undefined;
-    const socket = io(API_URL, { transports: ['websocket'] });
+    const socket = io(API_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: 8, timeout: 10000 });
     structureSocketRef.current = socket;
     socket.on('connect', () => socket.emit('server:join', { serverId: selectedServer.id }));
     socket.on('server:structure', (payload) => {
@@ -752,7 +752,7 @@ export default function AppHomePage() {
       try { if (signal.description) { await peer.setRemoteDescription(signal.description); const queued = pendingIceCandidatesRef.current.get(fromSocketId) || []; for (const candidate of queued) await peer.addIceCandidate(candidate); pendingIceCandidatesRef.current.delete(fromSocketId); if (signal.description.type === 'offer') { const answer = await peer.createAnswer(); await peer.setLocalDescription(answer); socket.emit('voice:signal', { targetSocketId: fromSocketId, signal: { description: peer.localDescription } }); } } else if (signal.candidate) { if (peer.remoteDescription) await peer.addIceCandidate(signal.candidate); else pendingIceCandidatesRef.current.set(fromSocketId, [...(pendingIceCandidatesRef.current.get(fromSocketId) || []), signal.candidate]); } } catch { setVoiceError('Connexion vocale interrompue.'); }
     });
     socket.on('voice:peer-left', ({ socketId }) => { const peer = peers.get(socketId); peer?.close(); peers.delete(socketId); const audio = remoteAudioRef.current.get(socketId); audio?.pause(); remoteAudioRef.current.delete(socketId); });
-    socket.on('connect_error', () => setVoiceError('Connexion vocale indisponible.'));
+    socket.on('connect_error', () => setVoiceError('Connexion vocale indisponible. Vérifie le micro et la connexion Internet.'));
     return () => { socket.emit('voice:leave'); socket.disconnect(); peers.forEach((peer) => peer.close()); peers.clear(); remoteAudioRef.current.forEach((audio) => audio.pause()); remoteAudioRef.current.clear(); };
   }, [activeVoiceChannelId, selectedServer?.id, user, voiceState.joined]);
 
