@@ -1,6 +1,6 @@
 {
   "name": "tavora-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Tavora desktop application",
   "main": "electron/main.cjs",
   "scripts": {
@@ -21,7 +21,12 @@
   "build": {
     "appId": "com.tavora.desktop",
     "productName": "Tavora",
-    "publish": { "provider": "github", "owner": "fiskedxd", "repo": "tevora-frontend", "releaseType": "release" },
+    "publish": {
+      "provider": "github",
+      "owner": "fiskedxd",
+      "repo": "tevora-frontend",
+      "releaseType": "release"
+    },
     "files": [
       "electron/**/*",
       "backend/**/*",
