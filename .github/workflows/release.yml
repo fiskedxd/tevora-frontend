@@ -33,9 +33,9 @@ jobs:
       - name: Remove stale workspace junction
         shell: powershell
         run: |
-          $junction = 'backend/node_modules/tavora-desktop'
-          if (Test-Path -LiteralPath $junction) {
-            Remove-Item -LiteralPath $junction -Force
+          $junction = Join-Path $env:GITHUB_WORKSPACE 'backend\node_modules\tavora-desktop'
+          if ([System.IO.Directory]::Exists($junction)) {
+            cmd.exe /c "rmdir /s /q `"$junction`""
           }
 
       - name: Enable Windows developer mode
