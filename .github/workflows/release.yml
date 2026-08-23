@@ -30,6 +30,14 @@ jobs:
       - name: Install backend production dependencies
         run: npm install --prefix backend --omit=dev
 
+      - name: Remove stale workspace junction
+        shell: powershell
+        run: |
+          $junction = 'backend/node_modules/tavora-desktop'
+          if (Test-Path -LiteralPath $junction) {
+            Remove-Item -LiteralPath $junction -Force
+          }
+
       - name: Enable Windows developer mode
         shell: powershell
         run: Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -Name AllowDevelopmentWithoutDevLicense -Type DWord -Value 1
