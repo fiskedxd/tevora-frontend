@@ -490,7 +490,8 @@ export default function AppHomePage() {
           if (userChanged) updateUser(nextUser);
         }
       } catch (error) {
-        console.error(error);
+        console.error('Social data loading failed:', error);
+        setMessage(error.message || 'Impossible de charger les amis et les serveurs.');
       } finally {
         loading = false;
       }
