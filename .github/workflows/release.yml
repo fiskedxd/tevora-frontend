@@ -30,6 +30,10 @@ jobs:
       - name: Install backend production dependencies
         run: npm install --prefix backend --omit=dev
 
+      - name: Enable Windows developer mode
+        shell: powershell
+        run: Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -Name AllowDevelopmentWithoutDevLicense -Type DWord -Value 1
+
       - name: Build and publish installer
         run: npm run build -- --publish never
 
