@@ -43,8 +43,8 @@ const buildDefaultServerStructure = (server) => {
         id: `${baseId}-voix`,
         name: 'Vocal',
         channels: [
-          { id: `${baseId}-voc-1`, type: 'voice', name: 'voc1' },
-          { id: `${baseId}-voc-2`, type: 'voice', name: 'voc2' },
+          { id: `${baseId}-voc-1`, type: 'voice', name: 'voc 1' },
+          { id: `${baseId}-voc-2`, type: 'voice', name: 'voc 2' },
         ],
       },
     ],
@@ -2121,7 +2121,7 @@ export default function AppHomePage() {
                           {privateMessages.map((msg, index) => {
                             const grouped = shouldGroupMessage(privateMessages, index);
                             return (
-                              <div key={msg._id || `${msg.authorUsername}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, true)} className={`tavora-message group relative px-2 text-sm text-white/70 ${grouped ? 'py-0.5' : 'py-2'}`}>
+                              <div key={msg._id || `${msg.authorUsername}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, true)} className={`tavora-message group relative px-2 text-sm text-white/70 ${grouped ? 'tavora-message-grouped py-0.5' : 'py-2'}`}>
                                 <div className="flex items-start gap-3">
                                   <div className="flex h-9 w-9 shrink-0 items-center justify-center">
                                     {!grouped ? <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-indigo-500/20 text-sm font-semibold text-indigo-300">
@@ -2264,7 +2264,7 @@ export default function AppHomePage() {
                               {channelMessages.map((msg, index) => {
                                 const grouped = shouldGroupMessage(channelMessages, index);
                                 return (
-                                  <div key={msg._id || `${msg.authorName}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, false)} className={`tavora-message group relative px-2 ${grouped ? 'py-0.5' : 'py-2'}`}>
+                                  <div key={msg._id || `${msg.authorName}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, false)} className={`tavora-message group relative px-2 ${grouped ? 'tavora-message-grouped py-0.5' : 'py-2'}`}>
                                     <div className="flex items-start gap-3">
                                       {!grouped ? <button
                                         type="button"

@@ -289,6 +289,11 @@ body {
   border-color: transparent !important;
 }
 
+.tavora-message.tavora-message-grouped {
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}
+
 .tavora-composer {
   background: var(--app-raised);
   border-color: var(--border-secondary) !important;
