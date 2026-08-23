@@ -28,7 +28,7 @@ jobs:
         run: npm ci --prefix frontend
 
       - name: Install backend production dependencies
-        run: npm ci --prefix backend --omit=dev
+        run: npm install --prefix backend --omit=dev
 
       - name: Build and publish installer
         run: npm run build -- --publish always
