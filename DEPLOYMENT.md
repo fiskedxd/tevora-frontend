@@ -20,6 +20,8 @@ fly deploy
 fly logs
 ```
 
+In MongoDB Atlas, add Fly.io access under Network Access. For a quick test use `0.0.0.0/0`; for production, replace it with the egress IPs of the Fly application when available. Adding only your personal IP does not allow Fly to connect.
+
 The included `fly.toml` maps Fly's health check to `/health` on port `5000` and keeps one machine running.
 
 Keep MongoDB on the same database and do not replace `MONGO_URI`, otherwise existing accounts will not be visible.

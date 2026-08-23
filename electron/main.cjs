@@ -64,7 +64,7 @@ app.whenReady().then(async () => {
     return window.isMaximized();
   });
   ipcMain.handle('window:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close());
-  startBackend();
+  if (!app.isPackaged || process.env.TEVORA_USE_LOCAL_BACKEND === '1') startBackend();
   setupAutoUpdates();
   try {
     await createWindow();

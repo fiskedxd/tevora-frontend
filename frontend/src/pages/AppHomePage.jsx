@@ -452,7 +452,10 @@ export default function AppHomePage() {
 
   useEffect(() => {
     let cancelled = false;
+    let loading = false;
     const loadSocial = async () => {
+      if (loading) return;
+      loading = true;
       try {
         const response = await fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() });
         const data = await readJsonResponse(response);
@@ -469,11 +472,13 @@ export default function AppHomePage() {
         }
       } catch (error) {
         console.error(error);
+      } finally {
+        loading = false;
       }
     };
     if (user) {
       loadSocial();
-      const intervalId = window.setInterval(loadSocial, 1500);
+      const intervalId = window.setInterval(loadSocial, 10000);
       return () => {
         cancelled = true;
         window.clearInterval(intervalId);
