@@ -480,10 +480,11 @@ export default function AppHomePage() {
         const data = await readJsonResponse(response);
         if (!response.ok) throw new Error(data.message || 'Impossible de charger la vue sociale.');
         if (cancelled) return;
-        setServers((data.servers || []).map(normalizeServer));
-        setFriends(data.friends || []);
-        setIncomingRequests(data.incomingRequests || []);
-        setOutgoingRequests(data.outgoingRequests || []);
+        const nextServers = (data.servers || []).map(normalizeServer);
+        setServers((current) => JSON.stringify(current) === JSON.stringify(nextServers) ? current : nextServers);
+        setFriends((current) => JSON.stringify(current) === JSON.stringify(data.friends || []) ? current : (data.friends || []));
+        setIncomingRequests((current) => JSON.stringify(current) === JSON.stringify(data.incomingRequests || []) ? current : (data.incomingRequests || []));
+        setOutgoingRequests((current) => JSON.stringify(current) === JSON.stringify(data.outgoingRequests || []) ? current : (data.outgoingRequests || []));
         if (data.user) {
           const nextUser = { ...(user || {}), ...data.user };
           const userChanged = Object.keys(data.user).some((key) => JSON.stringify(user?.[key]) !== JSON.stringify(nextUser[key]));
@@ -498,14 +499,14 @@ export default function AppHomePage() {
     };
     if (user) {
       loadSocial();
-      const intervalId = window.setInterval(loadSocial, 10000);
+      const intervalId = window.setInterval(loadSocial, 60000);
       return () => {
         cancelled = true;
         window.clearInterval(intervalId);
       };
     }
     return undefined;
-  }, [getAuthHeaders, user]);
+  }, [getAuthHeaders, user?._id || user?.id]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -527,7 +528,7 @@ export default function AppHomePage() {
     loadNotifications();
     const intervalId = window.setInterval(loadNotifications, 1500);
     return () => { cancelled = true; window.clearInterval(intervalId); };
-  }, [getAuthHeaders, user]);
+  }, [getAuthHeaders, user?._id || user?.id]);
 
   useEffect(() => {
     if (!user) return undefined;
