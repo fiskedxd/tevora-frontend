@@ -82,6 +82,22 @@ const mergeMessages = (existingMessages, incomingMessages) => {
   return Array.from(merged.values()).sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0));
 };
 
+const shouldGroupMessage = (messages, index) => {
+  if (index === 0) return false;
+  const previous = messages[index - 1];
+  const current = messages[index];
+  const previousAuthor = String(previous?.authorId?._id || previous?.authorId || '');
+  const currentAuthor = String(current?.authorId?._id || current?.authorId || '');
+  const previousType = previous?.type || (previous?.isPrivate ? 'private' : 'server');
+  const currentType = current?.type || (current?.isPrivate ? 'private' : 'server');
+  const previousConversation = String(previous?.conversationId || previous?.channelId || '');
+  const currentConversation = String(current?.conversationId || current?.channelId || '');
+  return previousAuthor && previousAuthor === currentAuthor
+    && previousType === currentType
+    && previousConversation === currentConversation
+    && new Date(current.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60 * 1000;
+};
+
 const extractServerIdFromInvite = (invite) => {
   const inviteUrl = typeof invite === 'string' ? invite : invite?.link || invite?.url || '';
   const rawValue = typeof invite === 'object' && invite?.serverId ? String(invite.serverId) : inviteUrl;
@@ -297,6 +313,8 @@ export default function AppHomePage() {
   const [incomingRequests, setIncomingRequests] = useState([]);
   const [outgoingRequests, setOutgoingRequests] = useState([]);
   const [liveNotifications, setLiveNotifications] = useState({ directMessages: [], servers: [] });
+  const [privateToasts, setPrivateToasts] = useState([]);
+  const privateNotificationIdsRef = useRef(new Set());
   const [isLiveNotificationsOpen, setIsLiveNotificationsOpen] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -371,6 +389,7 @@ export default function AppHomePage() {
   const profileRequestIdRef = useRef(0);
   const channelMessagesRef = useRef(null);
   const privateMessagesRef = useRef(null);
+  const structureSocketRef = useRef(null);
   const channelConversationKeyRef = useRef('');
   const privateConversationKeyRef = useRef('');
   const channelMessageCountRef = useRef(0);
@@ -387,6 +406,7 @@ export default function AppHomePage() {
     ?.flatMap((category) => category.channels)
     ?.find((channel) => channel.id === activeChannelId) || null;
   const isServerOwner = Boolean(selectedServer?.owner);
+  const canManageChannels = isServerOwner || serverPermissions.includes('ADMINISTRATOR') || serverPermissions.includes('MANAGE_CHANNELS');
   const channelConversationKey = `${selectedServer?.id || ''}:${activeChannelId || ''}`;
   const privateConversationKey = params.userId || '';
 
@@ -508,6 +528,55 @@ export default function AppHomePage() {
     const intervalId = window.setInterval(loadNotifications, 1500);
     return () => { cancelled = true; window.clearInterval(intervalId); };
   }, [getAuthHeaders, user]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    const socket = io(API_URL, { transports: ['websocket'] });
+    const currentUserId = String(user._id || user.id || '');
+    socket.on('connect', () => socket.emit('private:join', { userId: currentUserId }));
+    socket.on('private:message', async ({ message, sender }) => {
+      const senderId = String(message?.authorId || sender?.id || '');
+      const messageId = String(message?._id || `${senderId}:${message?.createdAt || Date.now()}`);
+      if (!message || !senderId || senderId === currentUserId || privateNotificationIdsRef.current.has(messageId)) return;
+      privateNotificationIdsRef.current.add(messageId);
+      const notificationSettings = { enabled: true, desktop: true, preview: true, avatar: true, duration: 5, ...(user.notifications || {}) };
+      if (!notificationSettings.enabled || !notificationSettings.directMessages || String(user.status || '').toLowerCase() === 'ne pas déranger') return;
+      const target = { id: senderId, username: message.authorUsername || sender.username, displayName: message.authorDisplayName || sender.displayName || sender.username || 'Utilisateur', avatarUrl: message.authorAvatarUrl || sender.avatarUrl || '' };
+      const preview = notificationSettings.preview ? String(message.content || '').slice(0, 160) : 'Nouveau message privé';
+      const isActive = document.visibilityState === 'visible' && document.hasFocus();
+      if (String(params.userId || '') === senderId) {
+        setPrivateMessages((current) => mergeMessages(current, [message]));
+        return;
+      }
+      if (isActive) {
+        const toast = { id: messageId, user: target, preview };
+        setPrivateToasts((current) => [...current.slice(-3), toast]);
+        window.setTimeout(() => setPrivateToasts((current) => current.filter((item) => item.id !== messageId)), notificationSettings.duration * 1000);
+      } else if (notificationSettings.desktop && window.tevoraDesktop?.showPrivateNotification) {
+        window.tevoraDesktop.showPrivateNotification({ userId: senderId, title: target.displayName, body: preview, icon: notificationSettings.avatar ? target.avatarUrl : '' });
+      } else if (notificationSettings.desktop && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification(target.displayName, { body: preview });
+      }
+    });
+    return () => socket.disconnect();
+  }, [params.userId, user]);
+
+  useEffect(() => {
+    if (!user || !selectedServer?.id) return undefined;
+    const socket = io(API_URL, { transports: ['websocket'] });
+    structureSocketRef.current = socket;
+    socket.on('connect', () => socket.emit('server:join', { serverId: selectedServer.id }));
+    socket.on('server:structure', (payload) => {
+      if (String(payload?.serverId) !== String(selectedServer.id) || !payload.structure) return;
+      setSelectedServer((current) => current?.id === selectedServer.id ? { ...current, structure: payload.structure } : current);
+      setServers((current) => current.map((server) => server.id === selectedServer.id ? { ...server, structure: payload.structure } : server));
+    });
+    return () => {
+      socket.emit('server:leave', { serverId: selectedServer.id });
+      socket.disconnect();
+      structureSocketRef.current = null;
+    };
+  }, [selectedServer?.id, user]);
 
   useEffect(() => {
     if (!params.serverId) {
@@ -897,6 +966,11 @@ export default function AppHomePage() {
     setIsProfileModalOpen(false);
     navigate(`/dm/${normalizedUserId}`);
   };
+
+  useEffect(() => {
+    const unsubscribe = window.tevoraDesktop?.onOpenPrivateNotification?.(({ userId }) => openDirectMessage(userId));
+    return unsubscribe;
+  }, [openDirectMessage]);
 
   const markDirectMessageRead = async (targetUserId) => {
     try {
@@ -1515,6 +1589,50 @@ export default function AppHomePage() {
 
   const hasVideoPreview = Boolean(localStream?.getVideoTracks().length && localStream.getVideoTracks().some((track) => track.readyState === 'live'));
 
+  const applyServerStructure = (structure) => {
+    const nextServer = { ...selectedServer, structure };
+    setSelectedServer(nextServer);
+    setServers((current) => current.map((server) => server.id === nextServer.id ? { ...server, structure } : server));
+  };
+
+  const createChannel = async (categoryId) => {
+    if (!selectedServer?.id || !canManageChannels) return;
+    const name = window.prompt('Nom du salon');
+    if (!name?.trim()) return;
+    const type = window.prompt('Type du salon : text ou voice', 'text')?.toLowerCase() === 'voice' ? 'voice' : 'text';
+    const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels`, {
+      method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ name: name.trim(), type, categoryId }),
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) { setMessage(data.message || 'Impossible de créer le salon.'); return; }
+    applyServerStructure(data.server.structure);
+    setMessage('Salon créé.');
+  };
+
+  const editChannel = async (channel, categoryId) => {
+    if (!selectedServer?.id || !canManageChannels) return;
+    const action = window.prompt(`Salon « ${channel.name} » : renommer ou supprimer`, channel.name);
+    if (action === null) return;
+    if (action.trim().toLowerCase() === 'supprimer') {
+      if (!window.confirm(`Supprimer le salon « ${channel.name} » ?`)) return;
+      const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channel.id)}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const data = await readJsonResponse(response);
+      if (!response.ok) { setMessage(data.message || 'Impossible de supprimer le salon.'); return; }
+      applyServerStructure(data.server.structure);
+      if (activeChannelId === channel.id) navigate(`/server/${selectedServer.id}`);
+      setMessage('Salon supprimé.');
+      return;
+    }
+    if (!action.trim()) return;
+    const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channel.id)}`, {
+      method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify({ name: action.trim(), categoryId }),
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) { setMessage(data.message || 'Impossible de modifier le salon.'); return; }
+    applyServerStructure(data.server.structure);
+    setMessage('Salon modifié.');
+  };
+
   const openProfileModal = async (profileUser = null, isSelfProfile = false) => {
     const requestId = profileRequestIdRef.current + 1;
     profileRequestIdRef.current = requestId;
@@ -1710,6 +1828,16 @@ export default function AppHomePage() {
 
   return (
     <div className="tavora-app-shell flex h-screen flex-col overflow-hidden text-white">
+      <div className="pointer-events-none fixed left-4 top-4 z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+        <AnimatePresence>
+          {privateToasts.map((toast) => (
+            <motion.button key={toast.id} type="button" initial={{ opacity: 0, x: -18, y: -8 }} animate={{ opacity: 1, x: 0, y: 0 }} exit={{ opacity: 0, x: -18 }} onClick={() => { setPrivateToasts((current) => current.filter((item) => item.id !== toast.id)); openDirectMessage(toast.user.id); }} className="pointer-events-auto flex items-center gap-3 rounded-xl border border-cyan-200/20 bg-[#11131b]/95 p-3 text-left shadow-2xl backdrop-blur-xl">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cyan-200/10 text-xs text-cyan-100">{toast.user.avatarUrl ? <img src={toast.user.avatarUrl} alt="" className="h-full w-full object-cover" /> : (toast.user.displayName || 'U').charAt(0).toUpperCase()}</div>
+              <span className="min-w-0"><strong className="block truncate text-sm text-white">{toast.user.displayName}</strong><span className="block truncate text-xs text-white/55">{toast.preview}</span></span>
+            </motion.button>
+          ))}
+        </AnimatePresence>
+      </div>
       <DesktopActivityManager user={user} getAuthHeaders={getAuthHeaders} />
       <GlobalTopBar getAuthHeaders={getAuthHeaders} user={user} userId={user?._id || user?.id} onOpenProfile={(profile) => openProfileModal(profile)} onToggleMobileSidebar={() => setIsMobileSidebarOpen((open) => !open)} />
       <div className="tavora-workspace flex min-h-0 flex-1 overflow-visible">
@@ -1832,6 +1960,9 @@ export default function AppHomePage() {
           onOpenFriendModal={() => setIsFriendModalOpen(true)}
           incomingRequests={incomingRequests}
           onFriendRequestDecision={handleFriendRequestDecision}
+          canManageChannels={canManageChannels}
+          onCreateChannel={createChannel}
+          onEditChannel={editChannel}
         />
 
         {false ? (
@@ -1986,26 +2117,25 @@ export default function AppHomePage() {
                       className="tavora-message-list relative flex-1 min-h-0 overflow-y-auto px-8 py-5"
                     >
                       {privateMessages.length > 0 ? (
-                        <div className="space-y-3">
-                          {privateMessages.map((msg) => {
+                        <div className="space-y-1">
+                          {privateMessages.map((msg, index) => {
+                            const grouped = shouldGroupMessage(privateMessages, index);
                             return (
-                              <div key={msg._id || `${msg.authorUsername}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, true)} className="tavora-message px-2 py-2 text-sm text-white/70">
+                              <div key={msg._id || `${msg.authorUsername}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, true)} className={`tavora-message group relative px-2 text-sm text-white/70 ${grouped ? 'py-0.5' : 'py-2'}`}>
                                 <div className="flex items-start gap-3">
-                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-sm font-semibold text-indigo-300 overflow-hidden">
-                                    {(msg.authorAvatarUrl || msg.author?.avatarUrl || '') ? (
-                                      <img src={msg.authorAvatarUrl || msg.author?.avatarUrl || ''} alt="avatar" className="h-full w-full object-cover" />
-                                    ) : (
-                                      (msg.authorDisplayName || msg.authorUsername || 'U').charAt(0).toUpperCase()
-                                    )}
+                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center">
+                                    {!grouped ? <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-indigo-500/20 text-sm font-semibold text-indigo-300">
+                                      {(msg.authorAvatarUrl || msg.author?.avatarUrl || '') ? <img src={msg.authorAvatarUrl || msg.author?.avatarUrl || ''} alt="avatar" className="h-full w-full object-cover" /> : (msg.authorDisplayName || msg.authorUsername || 'U').charAt(0).toUpperCase()}
+                                    </div> : <span className="pointer-events-none absolute left-0 hidden text-[10px] text-white/25 group-hover:block">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    <div className="flex items-center justify-between gap-2">
+                                    {!grouped ? <div className="flex items-center justify-between gap-2">
                                       <div>
                                         <span className="inline-flex items-center gap-2 font-medium text-white">{msg.authorDisplayName || msg.authorUsername || 'Utilisateur'}<ProfileBadges badges={msg.authorBadges} compact />{msg.isOfficialMessage ? <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200/75">Message officiel</span> : null}</span>
                                         <p className="text-[11px] text-white/30">@{msg.authorUsername || 'user'}</p>
                                       </div>
                                       <span className="text-[11px] text-white/30">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                    </div>
+                                    </div> : null}
                                     {editingMessageId === msg._id ? <div className="mt-2 flex gap-2"><input autoFocus value={editingMessageDraft} onChange={(event) => setEditingMessageDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') editMessage(); if (event.key === 'Escape') setEditingMessageId(null); }} className="min-w-0 flex-1 rounded-lg bg-black/30 px-2 py-1 text-sm text-white outline-none" /><button type="button" onClick={editMessage} className="text-xs text-cyan-200">Enregistrer</button></div> : <MessageContent content={msg.content} getAuthHeaders={getAuthHeaders} onJoin={handleJoinInvite} />}
                                     {msg.moderationAlert && user?.canModerate ? <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleModerationAlert(String(msg.moderationTargetId), 'ignore')} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/60 hover:bg-white/10">Ignorer</button><button type="button" onClick={() => handleModerationAlert(String(msg.moderationTargetId), 'warn')} className="rounded-lg bg-rose-400/15 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-400/25">Envoyer l’avertissement</button><button type="button" onClick={() => handleCopyReviewLink(String(msg.moderationReportId))} className="rounded-lg border border-cyan-200/20 px-3 py-2 text-xs text-cyan-100 hover:bg-cyan-200/10">Copier le lien de vérification</button></div> : null}
                                   </div>
@@ -2131,11 +2261,12 @@ export default function AppHomePage() {
                         >
                           {channelMessages.length > 0 ? (
                             <div className="space-y-1">
-                              {channelMessages.map((msg) => {
+                              {channelMessages.map((msg, index) => {
+                                const grouped = shouldGroupMessage(channelMessages, index);
                                 return (
-                                  <div key={msg._id || `${msg.authorName}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, false)} className="tavora-message px-2 py-2">
+                                  <div key={msg._id || `${msg.authorName}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, false)} className={`tavora-message group relative px-2 ${grouped ? 'py-0.5' : 'py-2'}`}>
                                     <div className="flex items-start gap-3">
-                                      <button
+                                      {!grouped ? <button
                                         type="button"
                                         onClick={() => openProfileModal({ id: msg.authorId, authorId: msg.authorId, username: msg.authorUsername || msg.authorName || 'user', displayName: msg.authorDisplayName || msg.authorName || 'Utilisateur', avatarUrl: msg.authorAvatarUrl || (String(msg.authorId) === String(user?._id || user?.id) ? user?.avatarUrl : '') }, false)}
                                         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-sm font-semibold text-indigo-300 overflow-hidden"
@@ -2145,15 +2276,15 @@ export default function AppHomePage() {
                                         ) : (
                                           (msg.authorDisplayName || msg.authorName || msg.authorUsername || 'U').charAt(0).toUpperCase()
                                         )}
-                                      </button>
+                                      </button> : <div className="h-10 w-10 shrink-0"><span className="pointer-events-none absolute left-0 hidden text-[10px] text-white/25 group-hover:block">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>}
                                       <div className="min-w-0 flex-1">
-                                        <div className="flex items-center justify-between gap-2">
+                                        {!grouped ? <div className="flex items-center justify-between gap-2">
                                           <div>
                                             <span className="inline-flex items-center gap-2 font-medium text-white">{msg.authorDisplayName || msg.authorName || 'Utilisateur'}<ProfileBadges badges={msg.authorBadges} compact />{msg.isOfficialMessage ? <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200/75">Message officiel</span> : null}</span>
                                             <p className="text-[11px] text-white/30">@{msg.authorUsername || msg.authorName || 'user'}</p>
                                           </div>
                                           <span className="text-[11px] text-white/30">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                        </div>
+                                        </div> : null}
                                         {editingMessageId === msg._id ? <div className="mt-2 flex gap-2"><input autoFocus value={editingMessageDraft} onChange={(event) => setEditingMessageDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') editMessage(); if (event.key === 'Escape') setEditingMessageId(null); }} className="min-w-0 flex-1 rounded-lg bg-black/30 px-2 py-1 text-sm text-white outline-none" /><button type="button" onClick={editMessage} className="text-xs text-cyan-200">Enregistrer</button></div> : <MessageContent content={msg.content} getAuthHeaders={getAuthHeaders} onJoin={handleJoinInvite} />}
                                       </div>
                                     </div>

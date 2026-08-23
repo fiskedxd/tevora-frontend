@@ -39,6 +39,10 @@ export default function WorkspaceSidebar({
   onOpenFriendModal,
   incomingRequests = [],
   onFriendRequestDecision,
+  canManageChannels = false,
+  onCreateChannel,
+  onEditChannel,
+  onDeleteChannel,
   className = '',
 }) {
   const [isServerMenuOpen, setIsServerMenuOpen] = useState(false);
@@ -122,13 +126,13 @@ export default function WorkspaceSidebar({
               <section key={category.id} className="mb-6">
                 <div className="mb-2 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/30">
                   <span>{category.name}</span>
-                  <Plus size={13} className="text-white/20" />
+                  {canManageChannels ? <button type="button" onClick={() => onCreateChannel?.(category.id)} className="rounded p-0.5 text-white/30 transition hover:bg-white/10 hover:text-white" title="Créer un salon"><Plus size={13} /></button> : null}
                 </div>
                 <div className="space-y-1">
                   {(category.channels || []).map((channel) => {
                     const active = String(activeChannelId) === String(channel.id);
                     return (
-                      <button key={channel.id} type="button" onClick={() => onOpenChannel(channel.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${active ? 'bg-white/[0.10] text-white shadow-[inset_2px_0_0_#9bdcff]' : 'text-white/45 hover:bg-white/[0.045] hover:text-white/80'}`}>
+                      <button key={channel.id} type="button" onClick={() => onOpenChannel(channel.id)} onContextMenu={(event) => { if (!canManageChannels) return; event.preventDefault(); onEditChannel?.(channel, category.id); }} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${active ? 'bg-white/[0.10] text-white shadow-[inset_2px_0_0_#9bdcff]' : 'text-white/45 hover:bg-white/[0.045] hover:text-white/80'}`} title={canManageChannels ? 'Clic droit pour modifier ou supprimer' : undefined}>
                         {channel.type === 'voice' ? <Volume2 size={16} /> : <Hash size={16} />}
                         <span className="truncate">{channel.name}</span>
                       </button>

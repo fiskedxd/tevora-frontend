@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, Notification, dialog, ipcMain, Menu } = require('electron');
 const path = require('node:path');
 const { fork } = require('node:child_process');
 const { autoUpdater } = require('electron-updater');
@@ -64,6 +64,24 @@ app.whenReady().then(async () => {
     return window.isMaximized();
   });
   ipcMain.handle('window:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  ipcMain.on('notification:show', (event, payload = {}) => {
+    if (!Notification.isSupported()) return;
+    const notification = new Notification({
+      title: String(payload.title || 'Nouveau message privé'),
+      body: String(payload.body || ''),
+      icon: typeof payload.icon === 'string' && payload.icon.startsWith('data:image/') ? payload.icon : path.join(__dirname, '..', 'frontend', 'public', 'favicon.png'),
+      silent: false,
+    });
+    notification.on('click', () => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window) return;
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      window.webContents.send('notification:open-private', { userId: String(payload.userId || '') });
+    });
+    notification.show();
+  });
   if (!app.isPackaged || process.env.TEVORA_USE_LOCAL_BACKEND === '1') startBackend();
   setupAutoUpdates();
   try {
