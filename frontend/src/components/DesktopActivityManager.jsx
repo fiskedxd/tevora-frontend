@@ -20,11 +20,16 @@ export default function DesktopActivityManager({ user, getAuthHeaders }) {
         }
         return;
       }
+      const payload = {
+        applicationId: application.id,
+        applicationName: application.name,
+        applicationType: application.type,
+      };
       if (lastApplicationRef.current !== application.id) lastApplicationRef.current = application.id;
       const response = await fetch(`${API_URL}/api/social/activity`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify(application),
+        body: JSON.stringify(payload),
       }).catch(() => null);
       if (response?.ok) await response.json();
     };

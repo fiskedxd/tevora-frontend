@@ -553,7 +553,7 @@ export default function AppHomePage() {
 
   useEffect(() => {
     if (!user) return undefined;
-    const socket = io(API_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: 8, timeout: 10000 });
+    const socket = io(API_URL, { transports: ['polling', 'websocket'], reconnection: true, reconnectionAttempts: 8, timeout: 10000 });
     const currentUserId = String(user._id || user.id || '');
     socket.on('connect', () => socket.emit('private:join', { userId: currentUserId }));
     socket.on('private:message', async ({ message, sender }) => {
