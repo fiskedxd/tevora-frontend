@@ -12,7 +12,8 @@ import DesktopActivityManager from '../components/DesktopActivityManager';
 import ChannelManagerModal from '../components/ChannelManagerModal';
 import { MessageMarkdown, MessageComposer } from '../components/MessageMarkdown';
 import { motion, AnimatePresence } from 'framer-motion';
-import { acquireRealtimeSocket, releaseRealtimeSocket } from '../services/realtimeSocket';
+import { acquireRealtimeSocket, disconnectRealtimeSocket, releaseRealtimeSocket } from '../services/realtimeSocket';
+import { fetchSocial } from '../services/socialApi';
 import { 
   Users, User, Plus, LogOut, 
   MessageSquare, Home, Settings,
@@ -493,9 +494,7 @@ export default function AppHomePage() {
           setOutgoingRequests(cached.outgoingRequests || []);
         }
         console.info('[social] loading /api/social/me');
-        const response = await fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() });
-        const data = await readJsonResponse(response);
-        if (!response.ok) throw new Error(data.message || 'Impossible de charger la vue sociale.');
+        const data = await fetchSocial(socialKey, getAuthHeaders);
         if (cancelled) return;
         const nextServers = (data.servers || []).map(normalizeServer);
         const nextSocial = { servers: nextServers, friends: data.friends || [], incomingRequests: data.incomingRequests || [], outgoingRequests: data.outgoingRequests || [] };
@@ -806,6 +805,7 @@ export default function AppHomePage() {
   }, [activeChannel?.type, activeChannelId, voiceChannelStates]);
 
   const handleLogout = () => {
+    disconnectRealtimeSocket();
     logout();
     navigate('/login');
   };
@@ -970,9 +970,7 @@ export default function AppHomePage() {
 
   const refreshSocial = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() });
-      const data = await readJsonResponse(response);
-      if (!response.ok) throw new Error(data.message || 'Impossible de recharger la vue sociale.');
+      const data = await fetchSocial(user?._id || user?.id, getAuthHeaders);
       setServers((data.servers || []).map(normalizeServer));
       setFriends(data.friends || []);
       setIncomingRequests(data.incomingRequests || []);
@@ -1237,9 +1235,8 @@ export default function AppHomePage() {
       const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.message || 'Impossible de rejoindre le serveur.');
       setInviteMessage(`Vous avez rejoint ${data.server?.name || 'le serveur'}.`);
-      const refreshedServers = await fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() });
-      const refreshedData = await readJsonResponse(refreshedServers);
-      if (refreshedServers.ok) {
+      const refreshedData = await fetchSocial(user?._id || user?.id, getAuthHeaders);
+      if (refreshedData) {
         const nextServers = (refreshedData.servers || []).map(normalizeServer);
         setServers(nextServers);
         if (data.server?.id) {

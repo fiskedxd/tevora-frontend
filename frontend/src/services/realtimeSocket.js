@@ -2,7 +2,6 @@ import { io } from 'socket.io-client';
 
 const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 let socket = null;
-let consumers = 0;
 
 export const acquireRealtimeSocket = () => {
   if (!socket) {
@@ -22,13 +21,13 @@ export const acquireRealtimeSocket = () => {
     socket.on('connect_error', (error) => console.warn('[socket] unavailable; HTTP data remains available:', error.message));
     socket.io.on('reconnect_attempt', (attempt) => console.info(`[socket] reconnect attempt ${attempt}/4`));
   }
-  consumers += 1;
   return socket;
 };
 
-export const releaseRealtimeSocket = () => {
-  consumers = Math.max(0, consumers - 1);
-  if (consumers === 0 && socket) {
+export const releaseRealtimeSocket = () => {};
+
+export const disconnectRealtimeSocket = () => {
+  if (socket) {
     socket.disconnect();
     socket = null;
   }

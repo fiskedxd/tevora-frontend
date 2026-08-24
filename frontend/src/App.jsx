@@ -46,7 +46,7 @@ function AppContent() {
 
   return (
     <>
-      <div key={`${location.pathname}${location.search}`} className="tavora-route-view">
+      <div className="tavora-route-view">
       <Routes>
         <Route path="/" element={user ? <AppHomePage /> : <HomePage />} />
         <Route path="/home" element={<ProtectedRoute user={user}><AppHomePage /></ProtectedRoute>} />
