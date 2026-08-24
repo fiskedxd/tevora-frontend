@@ -32,6 +32,7 @@ jobs:
         with:
           repository: fiskedxd/backend-tavora
           token: ${{ secrets.BACKEND_REPO_TOKEN }}
+          ref: main
           path: backend
 
       - name: Install root dependencies
