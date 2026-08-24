@@ -10,13 +10,14 @@ export const fetchSocial = (userId, getAuthHeaders) => {
     return pending;
   }
   const startedAt = performance.now();
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-  const request = fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders(), signal: controller.signal })
+  console.info('[social] /api/social/me fetch start');
+  const request = fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() })
     .then(async (response) => {
+      console.info('[social] /api/social/me HTTP response received', { status: response.status, durationMs: Math.round(performance.now() - startedAt) });
       const text = await response.text();
       let data = {};
       try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
+      console.info('[social] /api/social/me JSON parse done', { durationMs: Math.round(performance.now() - startedAt) });
       if (!response.ok) throw new Error(data.message || 'Impossible de charger la vue sociale.');
       console.info('[social] /api/social/me completed', { durationMs: Math.round(performance.now() - startedAt) });
       return data;
@@ -26,7 +27,6 @@ export const fetchSocial = (userId, getAuthHeaders) => {
       throw error;
     })
     .finally(() => {
-      window.clearTimeout(timeoutId);
       if (pendingSocialRequests.get(key) === request) pendingSocialRequests.delete(key);
     });
   pendingSocialRequests.set(key, request);

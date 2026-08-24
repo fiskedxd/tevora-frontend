@@ -1,6 +1,6 @@
 {
   "name": "tavora-desktop",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "description": "Tavora desktop application",
   "main": "electron/main.cjs",
   "scripts": {
