@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { io } from 'socket.io-client';
+import { acquireRealtimeSocket, releaseRealtimeSocket } from '../services/realtimeSocket';
 import { AudioLines, ChevronLeft, ChevronRight, Clipboard, Download, Menu, Pause, Play, Search, Volume2, VolumeX, X } from 'lucide-react';
 import MusicPlayer from './MusicPlayer';
 import PlaylistEditor from './PlaylistEditor';
@@ -39,7 +39,24 @@ function WhoisCard({ profile, onOpenProfile }) {
 
 function SearchPanel({ getAuthHeaders, onClose, onOpenProfile }) {
   const [query, setQuery] = useState(''); const [users, setUsers] = useState([]); const [selected, setSelected] = useState(null); const [loading, setLoading] = useState(false); const [error, setError] = useState('');
-  const submit = async (event) => { event.preventDefault(); if (query.trim().length < 2) return; setLoading(true); setError(''); setSelected(null); try { const response = await fetch(`${API_URL}/api/social/users/search?q=${encodeURIComponent(query.trim())}`, { headers: getAuthHeaders() }); const data = await response.json(); if (!response.ok) throw new Error(data.message); setUsers(data.users || []); } catch (requestError) { setUsers([]); setError(requestError.message || 'Recherche impossible.'); } finally { setLoading(false); } };
+  useEffect(() => {
+    const normalizedQuery = query.trim();
+    if (normalizedQuery.length < 2) { setUsers([]); setLoading(false); setError(''); return undefined; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true); setError(''); setSelected(null);
+      try {
+        const response = await fetch(`${API_URL}/api/social/users/search?q=${encodeURIComponent(normalizedQuery)}`, { headers: getAuthHeaders(), signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message);
+        setUsers(data.users || []);
+      } catch (requestError) {
+        if (requestError.name !== 'AbortError') { setUsers([]); setError(requestError.message || 'Recherche impossible.'); }
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    }, 300);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [getAuthHeaders, query]);
+  const submit = (event) => event.preventDefault();
   return <div className="absolute right-3 top-[calc(100%+10px)] z-50 w-[min(92vw,560px)] rounded-2xl border border-white/10 bg-[#0c0c12]/95 p-4 shadow-2xl backdrop-blur-xl"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold text-white">Rechercher un utilisateur</h2><button title="Fermer" type="button" onClick={onClose} className="p-1 text-white/45 hover:text-white"><X size={16} /></button></div><form onSubmit={submit} className="flex gap-2"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom d’utilisateur" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-200/50" /><button title="Lancer la recherche" type="submit" className="rounded-lg bg-cyan-200/15 px-3 text-cyan-100 hover:bg-cyan-200/25"><Search size={16} /></button></form>{loading ? <p className="mt-4 text-xs text-white/45">Recherche en cours...</p> : error ? <p className="mt-4 text-xs text-rose-300">{error}</p> : selected ? <div className="mt-4"><WhoisCard profile={selected} onOpenProfile={onOpenProfile} /></div> : <div className="mt-4 space-y-1">{users.map((profile) => <button key={profile._id} type="button" onClick={() => setSelected(profile)} className="flex w-full items-center gap-3 rounded-xl p-2 text-left hover:bg-white/8">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" className="h-9 w-9 rounded-lg object-cover" /> : <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-xs text-white">{profile.username?.[0]?.toUpperCase()}</div>}<span className="min-w-0"><strong className="block truncate text-sm text-white">{profile.displayName || profile.username}</strong><small className="text-xs text-white/40">@{profile.username}</small></span></button>)}{!users.length && query.length >= 2 ? <p className="text-xs text-white/35">Aucun utilisateur trouvé.</p> : null}</div>}</div>;
 }
 
@@ -65,7 +82,7 @@ function LegacyAudioPanel({ isOpen, onClose, onActivityChange }) {
 export default function GlobalTopBar({ getAuthHeaders, onOpenProfile, userId, user, onToggleMobileSidebar }) {
   const [panel, setPanel] = useState(null); const [audioActivity, setAudioActivity] = useState(null); const [playlistEditorOpen, setPlaylistEditorOpen] = useState(false); const [selectedPlaylist, setSelectedPlaylist] = useState(null); const [musicTracks, setMusicTracks] = useState([]); const [publicPlaylists, setPublicPlaylists] = useState([]); const rootRef = useRef(null); const audioSocketRef = useRef(null);
   useEffect(() => { const close = (event) => { if (!rootRef.current?.contains(event.target)) setPanel(null); }; document.addEventListener('mousedown', close); return () => document.removeEventListener('mousedown', close); }, []);
-  useEffect(() => { if (!userId) return undefined; const socket = io(API_URL, { transports: ['websocket'] }); audioSocketRef.current = socket; return () => { socket.emit('audio:activity', { userId, isPlaying: false }); socket.disconnect(); audioSocketRef.current = null; }; }, [userId]);
+  useEffect(() => { if (!userId) return undefined; const socket = acquireRealtimeSocket(); audioSocketRef.current = socket; return () => { socket.emit('audio:activity', { userId, isPlaying: false }); releaseRealtimeSocket(); audioSocketRef.current = null; }; }, [userId]);
   useEffect(() => { if (!userId || !audioSocketRef.current) return; audioSocketRef.current.emit('audio:activity', { userId, title: audioActivity?.currentTitle, isPlaying: Boolean(audioActivity?.isPlaying) }); }, [audioActivity, userId]);
   useEffect(() => {
     const openPlaylistEditor = (event) => {

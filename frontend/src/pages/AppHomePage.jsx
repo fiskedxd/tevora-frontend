@@ -12,7 +12,7 @@ import DesktopActivityManager from '../components/DesktopActivityManager';
 import ChannelManagerModal from '../components/ChannelManagerModal';
 import { MessageMarkdown, MessageComposer } from '../components/MessageMarkdown';
 import { motion, AnimatePresence } from 'framer-motion';
-import { io } from 'socket.io-client';
+import { acquireRealtimeSocket, releaseRealtimeSocket } from '../services/realtimeSocket';
 import { 
   Users, User, Plus, LogOut, 
   MessageSquare, Home, Settings,
@@ -547,13 +547,13 @@ export default function AppHomePage() {
       }
     };
     loadNotifications();
-    const intervalId = window.setInterval(loadNotifications, 10000);
+    const intervalId = window.setInterval(loadNotifications, 30000);
     return () => { cancelled = true; window.clearInterval(intervalId); };
   }, [getAuthHeaders, user?._id || user?.id]);
 
   useEffect(() => {
     if (!user) return undefined;
-    const socket = io(API_URL, { transports: ['polling', 'websocket'], reconnection: true, reconnectionAttempts: 8, timeout: 10000 });
+    const socket = acquireRealtimeSocket();
     const currentUserId = String(user._id || user.id || '');
     socket.on('connect', () => socket.emit('private:join', { userId: currentUserId }));
     socket.on('private:message', async ({ message, sender }) => {
@@ -580,12 +580,12 @@ export default function AppHomePage() {
         new Notification(target.displayName, { body: preview });
       }
     });
-    return () => socket.disconnect();
-  }, [params.userId, user]);
+    return () => releaseRealtimeSocket();
+  }, [params.userId, user?._id || user?.id]);
 
   useEffect(() => {
     if (!user || !selectedServer?.id) return undefined;
-    const socket = io(API_URL, { transports: ['websocket', 'polling'], reconnection: true, reconnectionAttempts: 8, timeout: 10000 });
+    const socket = acquireRealtimeSocket();
     structureSocketRef.current = socket;
     socket.on('connect', () => socket.emit('server:join', { serverId: selectedServer.id }));
     socket.on('server:structure', (payload) => {
@@ -595,10 +595,10 @@ export default function AppHomePage() {
     });
     return () => {
       socket.emit('server:leave', { serverId: selectedServer.id });
-      socket.disconnect();
+      releaseRealtimeSocket();
       structureSocketRef.current = null;
     };
-  }, [selectedServer?.id, user]);
+  }, [selectedServer?.id, user?._id || user?.id]);
 
   useEffect(() => {
     if (!params.serverId) {
@@ -686,7 +686,7 @@ export default function AppHomePage() {
       }
     };
     loadMessages(true);
-    const intervalId = window.setInterval(loadMessages, 5000);
+    const intervalId = window.setInterval(loadMessages, 30000);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
@@ -767,7 +767,7 @@ export default function AppHomePage() {
       return undefined;
     }
 
-    const socket = io(API_URL, { transports: ['polling', 'websocket'], upgrade: true, reconnection: true, reconnectionAttempts: 8, timeout: 10000 });
+    const socket = acquireRealtimeSocket();
     voiceSocketRef.current = socket;
     const peers = peerConnectionsRef.current;
     const createPeer = (participant, initiator) => {
@@ -791,8 +791,8 @@ export default function AppHomePage() {
     });
     socket.on('voice:peer-left', ({ socketId }) => { const peer = peers.get(socketId); peer?.close(); peers.delete(socketId); const audio = remoteAudioRef.current.get(socketId); audio?.pause(); remoteAudioRef.current.delete(socketId); });
     socket.on('connect_error', (error) => setVoiceError(`Connexion vocale indisponible. ${error?.message || 'Vérifie le micro et la connexion Internet.'}`));
-    return () => { socket.emit('voice:leave'); socket.disconnect(); peers.forEach((peer) => peer.close()); peers.clear(); remoteAudioRef.current.forEach((audio) => audio.pause()); remoteAudioRef.current.clear(); };
-  }, [activeVoiceChannelId, selectedServer?.id, user, voiceState.joined]);
+    return () => { socket.emit('voice:leave'); releaseRealtimeSocket(); peers.forEach((peer) => peer.close()); peers.clear(); remoteAudioRef.current.forEach((audio) => audio.pause()); remoteAudioRef.current.clear(); };
+  }, [activeVoiceChannelId, selectedServer?.id, user?._id || user?.id, voiceState.joined]);
 
   useEffect(() => {
     if (activeChannel?.type === 'voice' && activeChannelId) {
