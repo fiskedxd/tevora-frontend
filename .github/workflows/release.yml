@@ -22,8 +22,11 @@ jobs:
           cache: npm
 
       - name: Checkout backend repository
-        shell: powershell
-        run: git clone https://github.com/fiskedxd/backend-tavora.git backend
+        uses: actions/checkout@v4
+        with:
+          repository: fiskedxd/backend-tavora
+          token: ${{ secrets.BACKEND_REPO_TOKEN }}
+          path: backend
 
       - name: Install root dependencies
         run: npm ci
