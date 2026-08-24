@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Notification, dialog, ipcMain, Menu, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const path = require('node:path');
 const { fork } = require('node:child_process');
 const { autoUpdater } = require('electron-updater');
@@ -24,7 +24,6 @@ function startBackend() {
     env: { ...process.env, PORT: String(PORT), TEVORA_DESKTOP: '1', TEVORA_DATA_DIR: path.join(app.getPath('userData'), 'data') },
     silent: true,
   });
-  backendProcess.stdout?.on('data', (data) => console.log(`[backend] ${data}`));
   backendProcess.stderr?.on('data', (data) => console.error(`[backend] ${data}`));
   backendProcess.on('error', (error) => console.error('Backend startup failed:', error));
   backendProcess.on('exit', (code) => {
@@ -44,30 +43,18 @@ async function createWindow() {
     icon: path.join(__dirname, '..', 'frontend', 'public', 'favicon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false },
   });
-  window.webContents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'i') {
-      event.preventDefault();
-      window.webContents.toggleDevTools();
-    }
-  });
   const isDevelopment = process.argv.includes('--dev');
-  const pageStartedAt = Date.now();
   if (isDevelopment) {
     await window.loadURL('http://localhost:5173');
   } else {
     await window.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
   }
-  console.log(`[window] page loaded in ${Date.now() - pageStartedAt}ms (${isDevelopment ? 'dev server' : 'production build'})`);
   return window;
 }
 
 app.whenReady().then(async () => {
   app.setAppUserModelId('com.tavora.desktop');
   Menu.setApplicationMenu(null);
-  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(['media', 'microphone', 'camera', 'notifications'].includes(permission));
-  });
-  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => ['media', 'microphone', 'camera', 'notifications'].includes(permission));
   ipcMain.handle('activity:detect', () => detectApplications());
   ipcMain.handle('window:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
   ipcMain.handle('window:toggle-maximize', (event) => {
@@ -77,24 +64,6 @@ app.whenReady().then(async () => {
     return window.isMaximized();
   });
   ipcMain.handle('window:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close());
-  ipcMain.on('notification:show', (event, payload = {}) => {
-    if (!Notification.isSupported()) return;
-    const notification = new Notification({
-      title: String(payload.title || 'Nouveau message privé'),
-      body: String(payload.body || ''),
-      icon: typeof payload.icon === 'string' && payload.icon.startsWith('data:image/') ? payload.icon : path.join(__dirname, '..', 'frontend', 'public', 'favicon.png'),
-      silent: false,
-    });
-    notification.on('click', () => {
-      const window = BrowserWindow.fromWebContents(event.sender);
-      if (!window) return;
-      if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
-      window.webContents.send('notification:open-private', { userId: String(payload.userId || '') });
-    });
-    notification.show();
-  });
   if (!app.isPackaged || process.env.TEVORA_USE_LOCAL_BACKEND === '1') startBackend();
   setupAutoUpdates();
   try {

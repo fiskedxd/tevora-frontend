@@ -9,11 +9,9 @@ import RoleSettingsPanel from '../components/RoleSettingsPanel';
 import ServerBannerEditor from '../components/ServerBannerEditor';
 import ProfileBadges from '../components/ProfileBadges';
 import DesktopActivityManager from '../components/DesktopActivityManager';
-import ChannelManagerModal from '../components/ChannelManagerModal';
 import { MessageMarkdown, MessageComposer } from '../components/MessageMarkdown';
 import { motion, AnimatePresence } from 'framer-motion';
-import { acquireRealtimeSocket, disconnectRealtimeSocket, releaseRealtimeSocket } from '../services/realtimeSocket';
-import { fetchSocial } from '../services/socialApi';
+import { io } from 'socket.io-client';
 import { 
   Users, User, Plus, LogOut, 
   MessageSquare, Home, Settings,
@@ -27,13 +25,7 @@ import {
   Mic, MicOff, Video, VideoOff, Radio
 } from 'lucide-react';
 
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
-console.info('[app] API URL:', API_URL);
-const socialCache = new Map();
-const messageCache = new Map();
-const memberCache = new Map();
-const readSessionCache = (key) => { try { return JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { return null; } };
-const writeSessionCache = (key, value) => { try { sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* Storage may be unavailable. */ } };
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const buildDefaultServerStructure = (server) => {
   const baseId = String(server.id || server.name || 'server').toLowerCase().replace(/\s+/g, '-');
@@ -51,8 +43,8 @@ const buildDefaultServerStructure = (server) => {
         id: `${baseId}-voix`,
         name: 'Vocal',
         channels: [
-          { id: `${baseId}-voc-1`, type: 'voice', name: 'voc 1' },
-          { id: `${baseId}-voc-2`, type: 'voice', name: 'voc 2' },
+          { id: `${baseId}-voc-1`, type: 'voice', name: 'voc1' },
+          { id: `${baseId}-voc-2`, type: 'voice', name: 'voc2' },
         ],
       },
     ],
@@ -88,19 +80,6 @@ const mergeMessages = (existingMessages, incomingMessages) => {
     merged.set(key, message);
   });
   return Array.from(merged.values()).sort((left, right) => new Date(left.createdAt || 0) - new Date(right.createdAt || 0));
-};
-
-const shouldGroupMessage = (messages, index) => {
-  if (index === 0) return false;
-  const previous = messages[index - 1];
-  const current = messages[index];
-  const previousAuthor = String(previous?.authorId?._id || previous?.authorId || '');
-  const currentAuthor = String(current?.authorId?._id || current?.authorId || '');
-  const previousType = previous?.type || (previous?.isPrivate ? 'private' : 'server');
-  const currentType = current?.type || (current?.isPrivate ? 'private' : 'server');
-  return previousAuthor && previousAuthor === currentAuthor
-    && previousType === currentType
-    && new Date(current.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60 * 1000;
 };
 
 const extractServerIdFromInvite = (invite) => {
@@ -318,13 +297,10 @@ export default function AppHomePage() {
   const [incomingRequests, setIncomingRequests] = useState([]);
   const [outgoingRequests, setOutgoingRequests] = useState([]);
   const [liveNotifications, setLiveNotifications] = useState({ directMessages: [], servers: [] });
-  const [privateToasts, setPrivateToasts] = useState([]);
-  const privateNotificationIdsRef = useRef(new Set());
   const [isLiveNotificationsOpen, setIsLiveNotificationsOpen] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [message, setMessage] = useState('');
-  const [channelManager, setChannelManager] = useState({ open: false, mode: 'create', channel: null, categoryId: '', error: '', busy: false });
   const [selectedServer, setSelectedServer] = useState(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isServerModalOpen, setIsServerModalOpen] = useState(false);
@@ -395,7 +371,6 @@ export default function AppHomePage() {
   const profileRequestIdRef = useRef(0);
   const channelMessagesRef = useRef(null);
   const privateMessagesRef = useRef(null);
-  const structureSocketRef = useRef(null);
   const channelConversationKeyRef = useRef('');
   const privateConversationKeyRef = useRef('');
   const channelMessageCountRef = useRef(0);
@@ -482,51 +457,36 @@ export default function AppHomePage() {
     const loadSocial = async () => {
       if (loading) return;
       loading = true;
-      const startedAt = performance.now();
       try {
-        const socialKey = String(user?._id || user?.id);
-        const cached = socialCache.get(socialKey) || readSessionCache(`tavora:social:${socialKey}`);
-        if (cached && !cancelled) {
-          console.info('[social] cache displayed', { servers: cached.servers?.length || 0, friends: cached.friends?.length || 0 });
-          setServers(cached.servers || []);
-          setFriends(cached.friends || []);
-          setIncomingRequests(cached.incomingRequests || []);
-          setOutgoingRequests(cached.outgoingRequests || []);
-        }
-        console.info('[social] loading /api/social/me');
-        const data = await fetchSocial(socialKey, getAuthHeaders);
+        const response = await fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() });
+        const data = await readJsonResponse(response);
+        if (!response.ok) throw new Error(data.message || 'Impossible de charger la vue sociale.');
         if (cancelled) return;
-        const nextServers = (data.servers || []).map(normalizeServer);
-        const nextSocial = { servers: nextServers, friends: data.friends || [], incomingRequests: data.incomingRequests || [], outgoingRequests: data.outgoingRequests || [] };
-        console.info('[social] loaded', { servers: nextServers.length, friends: nextSocial.friends.length, durationMs: Math.round(performance.now() - startedAt) });
-        socialCache.set(socialKey, nextSocial);
-        writeSessionCache(`tavora:social:${socialKey}`, nextSocial);
-        setServers((current) => JSON.stringify(current) === JSON.stringify(nextServers) ? current : nextServers);
-        setFriends((current) => JSON.stringify(current) === JSON.stringify(data.friends || []) ? current : (data.friends || []));
-        setIncomingRequests((current) => JSON.stringify(current) === JSON.stringify(data.incomingRequests || []) ? current : (data.incomingRequests || []));
-        setOutgoingRequests((current) => JSON.stringify(current) === JSON.stringify(data.outgoingRequests || []) ? current : (data.outgoingRequests || []));
+        setServers((data.servers || []).map(normalizeServer));
+        setFriends(data.friends || []);
+        setIncomingRequests(data.incomingRequests || []);
+        setOutgoingRequests(data.outgoingRequests || []);
         if (data.user) {
           const nextUser = { ...(user || {}), ...data.user };
           const userChanged = Object.keys(data.user).some((key) => JSON.stringify(user?.[key]) !== JSON.stringify(nextUser[key]));
           if (userChanged) updateUser(nextUser);
         }
       } catch (error) {
-        console.error('[social] loading failed', { durationMs: Math.round(performance.now() - startedAt), error });
-        setMessage(error.message || 'Impossible de charger les amis et les serveurs.');
+        console.error(error);
       } finally {
         loading = false;
       }
     };
     if (user) {
       loadSocial();
-      const intervalId = window.setInterval(loadSocial, 60000);
+      const intervalId = window.setInterval(loadSocial, 10000);
       return () => {
         cancelled = true;
         window.clearInterval(intervalId);
       };
     }
     return undefined;
-  }, [getAuthHeaders, user?._id || user?.id]);
+  }, [getAuthHeaders, user]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -546,58 +506,9 @@ export default function AppHomePage() {
       }
     };
     loadNotifications();
-    const intervalId = window.setInterval(loadNotifications, 30000);
+    const intervalId = window.setInterval(loadNotifications, 1500);
     return () => { cancelled = true; window.clearInterval(intervalId); };
-  }, [getAuthHeaders, user?._id || user?.id]);
-
-  useEffect(() => {
-    if (!user) return undefined;
-    const socket = acquireRealtimeSocket();
-    const currentUserId = String(user._id || user.id || '');
-    socket.on('connect', () => socket.emit('private:join', { userId: currentUserId }));
-    socket.on('private:message', async ({ message, sender }) => {
-      const senderId = String(message?.authorId || sender?.id || '');
-      const messageId = String(message?._id || `${senderId}:${message?.createdAt || Date.now()}`);
-      if (!message || !senderId || senderId === currentUserId || privateNotificationIdsRef.current.has(messageId)) return;
-      privateNotificationIdsRef.current.add(messageId);
-      const notificationSettings = { enabled: true, desktop: true, preview: true, avatar: true, duration: 5, ...(user.notifications || {}) };
-      if (!notificationSettings.enabled || !notificationSettings.directMessages || String(user.status || '').toLowerCase() === 'ne pas déranger') return;
-      const target = { id: senderId, username: message.authorUsername || sender.username, displayName: message.authorDisplayName || sender.displayName || sender.username || 'Utilisateur', avatarUrl: message.authorAvatarUrl || sender.avatarUrl || '' };
-      const preview = notificationSettings.preview ? String(message.content || '').slice(0, 160) : 'Nouveau message privé';
-      const isActive = document.visibilityState === 'visible' && document.hasFocus();
-      if (String(params.userId || '') === senderId) {
-        setPrivateMessages((current) => mergeMessages(current, [message]));
-        return;
-      }
-      if (isActive) {
-        const toast = { id: messageId, user: target, preview };
-        setPrivateToasts((current) => [...current.slice(-3), toast]);
-        window.setTimeout(() => setPrivateToasts((current) => current.filter((item) => item.id !== messageId)), notificationSettings.duration * 1000);
-      } else if (notificationSettings.desktop && window.tevoraDesktop?.showPrivateNotification) {
-        window.tevoraDesktop.showPrivateNotification({ userId: senderId, title: target.displayName, body: preview, icon: notificationSettings.avatar ? target.avatarUrl : '' });
-      } else if (notificationSettings.desktop && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification(target.displayName, { body: preview });
-      }
-    });
-    return () => releaseRealtimeSocket();
-  }, [params.userId, user?._id || user?.id]);
-
-  useEffect(() => {
-    if (!user || !selectedServer?.id) return undefined;
-    const socket = acquireRealtimeSocket();
-    structureSocketRef.current = socket;
-    socket.on('connect', () => socket.emit('server:join', { serverId: selectedServer.id }));
-    socket.on('server:structure', (payload) => {
-      if (String(payload?.serverId) !== String(selectedServer.id) || !payload.structure) return;
-      setSelectedServer((current) => current?.id === selectedServer.id ? { ...current, structure: payload.structure } : current);
-      setServers((current) => current.map((server) => server.id === selectedServer.id ? { ...server, structure: payload.structure } : server));
-    });
-    return () => {
-      socket.emit('server:leave', { serverId: selectedServer.id });
-      releaseRealtimeSocket();
-      structureSocketRef.current = null;
-    };
-  }, [selectedServer?.id, user?._id || user?.id]);
+  }, [getAuthHeaders, user]);
 
   useEffect(() => {
     if (!params.serverId) {
@@ -619,16 +530,10 @@ export default function AppHomePage() {
   useEffect(() => {
     const loadMembers = async () => {
       if (!selectedServer?.id) {
+        setServerMembers([]);
         return;
       }
       try {
-        const memberKey = String(selectedServer.id);
-        const cached = memberCache.get(memberKey) || readSessionCache(`tavora:members:${memberKey}`);
-        if (cached) {
-          setServerMembers(cached.members || []);
-          setServerRoles(cached.roles || []);
-          setServerPermissions(cached.permissions || []);
-        }
         const [rolesResponse, membersResponse] = await Promise.all([
           fetch(`${API_URL}/api/social/servers/${selectedServer.id}/roles`, { headers: getAuthHeaders() }),
           fetch(`${API_URL}/api/social/servers/${selectedServer.id}/members`, { headers: getAuthHeaders() }),
@@ -641,15 +546,12 @@ export default function AppHomePage() {
         const membersData = await readJsonResponse(membersResponse);
         if (membersResponse.ok) {
           setServerMembers(membersData.members || []);
-          const nextMembers = { members: membersData.members || [], roles: rolesData.roles || [], permissions: rolesData.permissions || [] };
-          memberCache.set(memberKey, nextMembers);
-          writeSessionCache(`tavora:members:${memberKey}`, nextMembers);
         } else {
-          if (!cached) setServerMembers([]);
+          setServerMembers([]);
         }
       } catch (error) {
         console.error(error);
-        if (!memberCache.has(String(selectedServer?.id))) setServerMembers((current) => current);
+        setServerMembers([]);
       }
     };
     loadMembers();
@@ -661,22 +563,18 @@ export default function AppHomePage() {
     const loadMessages = async (reset = false) => {
       if (loading) return;
       if (!selectedServer?.id || !activeChannelId || activeChannel?.type !== 'text') {
+        setChannelMessages([]);
         return;
       }
       loading = true;
-      const messageKey = `${selectedServer.id}:${activeChannelId}`;
-      const cached = messageCache.get(messageKey) || readSessionCache(`tavora:messages:${messageKey}`);
-      if (cached) setChannelMessages(cached);
+      if (reset) setChannelMessages([]);
       try {
         const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/messages/${activeChannelId}`, {
           headers: getAuthHeaders(),
         });
         const data = await readJsonResponse(response);
         if (response.ok && !cancelled) {
-          const nextMessages = data.messages || [];
-          messageCache.set(messageKey, nextMessages);
-          writeSessionCache(`tavora:messages:${messageKey}`, nextMessages);
-          setChannelMessages(nextMessages);
+          setChannelMessages(data.messages || []);
         }
       } catch (error) {
         console.error(error);
@@ -685,7 +583,7 @@ export default function AppHomePage() {
       }
     };
     loadMessages(true);
-    const intervalId = window.setInterval(loadMessages, 30000);
+    const intervalId = window.setInterval(loadMessages, 1500);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
@@ -766,7 +664,7 @@ export default function AppHomePage() {
       return undefined;
     }
 
-    const socket = acquireRealtimeSocket();
+    const socket = io(API_URL, { transports: ['websocket'] });
     voiceSocketRef.current = socket;
     const peers = peerConnectionsRef.current;
     const createPeer = (participant, initiator) => {
@@ -780,7 +678,7 @@ export default function AppHomePage() {
       if (initiator) peer.createOffer().then((offer) => peer.setLocalDescription(offer).then(() => socket.emit('voice:signal', { targetSocketId: participant.socketId, signal: { description: peer.localDescription } }))).catch(() => {});
       return peer;
     };
-    socket.on('connect', () => { setVoiceError(''); socket.emit('voice:join', { serverId: selectedServer.id, channelId: activeVoiceChannelId, user: { id: user?._id || user?.id, username: user?.username, displayName: user?.displayName, avatarUrl: user?.avatarUrl } }); });
+    socket.on('connect', () => socket.emit('voice:join', { serverId: selectedServer.id, channelId: activeVoiceChannelId, user: { id: user?._id || user?.id, username: user?.username, displayName: user?.displayName, avatarUrl: user?.avatarUrl } }));
     socket.on('voice:participants', (participants) => { setVoiceParticipants([...new Map(participants.map((participant) => [String(participant.userId), { ...participant, id: participant.userId, name: participant.displayName, isSelf: String(participant.userId) === String(user?._id || user?.id) }])).values()]); participants.filter((participant) => String(participant.userId) !== String(user?._id || user?.id)).forEach((participant) => createPeer(participant, false)); });
     socket.on('voice:peer-joined', (participant) => createPeer(participant, true));
     socket.on('voice:signal', async ({ fromSocketId, signal }) => {
@@ -789,9 +687,9 @@ export default function AppHomePage() {
       try { if (signal.description) { await peer.setRemoteDescription(signal.description); const queued = pendingIceCandidatesRef.current.get(fromSocketId) || []; for (const candidate of queued) await peer.addIceCandidate(candidate); pendingIceCandidatesRef.current.delete(fromSocketId); if (signal.description.type === 'offer') { const answer = await peer.createAnswer(); await peer.setLocalDescription(answer); socket.emit('voice:signal', { targetSocketId: fromSocketId, signal: { description: peer.localDescription } }); } } else if (signal.candidate) { if (peer.remoteDescription) await peer.addIceCandidate(signal.candidate); else pendingIceCandidatesRef.current.set(fromSocketId, [...(pendingIceCandidatesRef.current.get(fromSocketId) || []), signal.candidate]); } } catch { setVoiceError('Connexion vocale interrompue.'); }
     });
     socket.on('voice:peer-left', ({ socketId }) => { const peer = peers.get(socketId); peer?.close(); peers.delete(socketId); const audio = remoteAudioRef.current.get(socketId); audio?.pause(); remoteAudioRef.current.delete(socketId); });
-    socket.on('connect_error', (error) => setVoiceError(`Connexion vocale indisponible. ${error?.message || 'Vérifie le micro et la connexion Internet.'}`));
-    return () => { socket.emit('voice:leave'); releaseRealtimeSocket(); peers.forEach((peer) => peer.close()); peers.clear(); remoteAudioRef.current.forEach((audio) => audio.pause()); remoteAudioRef.current.clear(); };
-  }, [activeVoiceChannelId, selectedServer?.id, user?._id || user?.id, voiceState.joined]);
+    socket.on('connect_error', () => setVoiceError('Connexion vocale indisponible.'));
+    return () => { socket.emit('voice:leave'); socket.disconnect(); peers.forEach((peer) => peer.close()); peers.clear(); remoteAudioRef.current.forEach((audio) => audio.pause()); remoteAudioRef.current.clear(); };
+  }, [activeVoiceChannelId, selectedServer?.id, user, voiceState.joined]);
 
   useEffect(() => {
     if (activeChannel?.type === 'voice' && activeChannelId) {
@@ -805,7 +703,6 @@ export default function AppHomePage() {
   }, [activeChannel?.type, activeChannelId, voiceChannelStates]);
 
   const handleLogout = () => {
-    disconnectRealtimeSocket();
     logout();
     navigate('/login');
   };
@@ -970,7 +867,9 @@ export default function AppHomePage() {
 
   const refreshSocial = async () => {
     try {
-      const data = await fetchSocial(user?._id || user?.id, getAuthHeaders);
+      const response = await fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() });
+      const data = await readJsonResponse(response);
+      if (!response.ok) throw new Error(data.message || 'Impossible de recharger la vue sociale.');
       setServers((data.servers || []).map(normalizeServer));
       setFriends(data.friends || []);
       setIncomingRequests(data.incomingRequests || []);
@@ -999,11 +898,6 @@ export default function AppHomePage() {
     setIsProfileModalOpen(false);
     navigate(`/dm/${normalizedUserId}`);
   };
-
-  useEffect(() => {
-    const unsubscribe = window.tevoraDesktop?.onOpenPrivateNotification?.(({ userId }) => openDirectMessage(userId));
-    return unsubscribe;
-  }, [openDirectMessage]);
 
   const markDirectMessageRead = async (targetUserId) => {
     try {
@@ -1049,16 +943,12 @@ export default function AppHomePage() {
     }
 
     let cancelled = false;
+    setSelectedServer(null);
+    setPrivateChatUser(null);
+    setPrivateMessages([]);
     setPrivateDraft('');
     setProfileMessage('');
     setIsLoadingPrivateChat(true);
-    const privateCacheKey = `dm:${targetUserId}`;
-    const cachedPrivate = messageCache.get(privateCacheKey) || readSessionCache(`tavora:dm:${targetUserId}`);
-    if (cachedPrivate) {
-      setPrivateChatUser(cachedPrivate.user || null);
-      setPrivateMessages(cachedPrivate.messages || []);
-      setIsLoadingPrivateChat(false);
-    }
 
     const loadPrivateChat = async () => {
       try {
@@ -1073,9 +963,6 @@ export default function AppHomePage() {
         if (cancelled) return;
         setPrivateChatUser(profileData.user || messagesData.friend || { id: targetUserId });
         setPrivateMessages(messagesData.messages || []);
-        const nextPrivate = { user: profileData.user || messagesData.friend || { id: targetUserId }, messages: messagesData.messages || [] };
-        messageCache.set(privateCacheKey, nextPrivate);
-        writeSessionCache(`tavora:dm:${targetUserId}`, nextPrivate);
       } catch (error) {
         if (!cancelled) {
           setPrivateChatUser(null);
@@ -1117,7 +1004,7 @@ export default function AppHomePage() {
         loading = false;
       }
     };
-    const intervalId = window.setInterval(syncPrivateMessages, 5000);
+    const intervalId = window.setInterval(syncPrivateMessages, 1500);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
@@ -1235,8 +1122,9 @@ export default function AppHomePage() {
       const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.message || 'Impossible de rejoindre le serveur.');
       setInviteMessage(`Vous avez rejoint ${data.server?.name || 'le serveur'}.`);
-      const refreshedData = await fetchSocial(user?._id || user?.id, getAuthHeaders);
-      if (refreshedData) {
+      const refreshedServers = await fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() });
+      const refreshedData = await readJsonResponse(refreshedServers);
+      if (refreshedServers.ok) {
         const nextServers = (refreshedData.servers || []).map(normalizeServer);
         setServers(nextServers);
         if (data.server?.id) {
@@ -1548,7 +1436,7 @@ export default function AppHomePage() {
       setActiveVoiceChannelId(activeChannelId);
       applyVoiceChannelState(activeChannelId, { ...currentState, joined: true, cameraOn: hasVideo, micOn: true, streaming: false });
     } catch (error) {
-      setMediaError(error.name === 'NotAllowedError' ? 'Accès au micro refusé. Autorise le microphone pour Tavora dans les paramètres Windows.' : error.message || 'Impossible d’activer le micro.');
+      setMediaError(error.message || 'Impossible d’activer le micro.');
     }
   };
 
@@ -1634,39 +1522,42 @@ export default function AppHomePage() {
     setServers((current) => current.map((server) => server.id === nextServer.id ? { ...server, structure } : server));
   };
 
-  const createChannel = (categoryId, duplicateChannel = null) => {
+  const createChannel = async (categoryId) => {
     if (!selectedServer?.id || !canManageChannels) return;
-    setChannelManager({ open: true, mode: 'create', channel: duplicateChannel ? { ...duplicateChannel, name: `${duplicateChannel.name}-copie` } : null, categoryId, error: '', busy: false });
-  };
-
-  const editChannel = (channel, categoryId) => {
-    if (!selectedServer?.id || !canManageChannels) return;
-    setChannelManager({ open: true, mode: 'edit', channel: { ...channel, categoryId }, categoryId, error: '', busy: false });
-  };
-
-  const deleteChannel = async (channel) => {
-    if (!selectedServer?.id || !canManageChannels || !window.confirm(`Supprimer « ${channel.name} » ? Cette action est définitive.`)) return;
-    const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channel.id)}`, { method: 'DELETE', headers: getAuthHeaders() });
+    const name = window.prompt('Nom du salon');
+    if (!name?.trim()) return;
+    const type = window.prompt('Type du salon : text ou voice', 'text')?.toLowerCase() === 'voice' ? 'voice' : 'text';
+    const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels`, {
+      method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ name: name.trim(), type, categoryId }),
+    });
     const data = await readJsonResponse(response);
-    if (!response.ok) { setMessage(data.message || 'Impossible de supprimer le salon.'); return; }
+    if (!response.ok) { setMessage(data.message || 'Impossible de créer le salon.'); return; }
     applyServerStructure(data.server.structure);
-    setChannelManager({ open: false });
-    if (activeChannelId === channel.id) navigate(`/server/${selectedServer.id}`);
-    setMessage('Salon supprimé.');
+    setMessage('Salon créé.');
   };
 
-  const saveChannel = async (draft) => {
+  const editChannel = async (channel, categoryId) => {
     if (!selectedServer?.id || !canManageChannels) return;
-    setChannelManager((current) => ({ ...current, busy: true, error: '' }));
-    const isCategory = channelManager.mode === 'category';
-    const editing = channelManager.mode === 'edit';
-    const endpoint = isCategory ? `${API_URL}/api/social/servers/${selectedServer.id}/categories` : editing ? `${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channelManager.channel.id)}` : `${API_URL}/api/social/servers/${selectedServer.id}/channels`;
-    const response = await fetch(endpoint, { method: editing ? 'PUT' : 'POST', headers: getAuthHeaders(), body: JSON.stringify(draft) });
+    const action = window.prompt(`Salon « ${channel.name} » : renommer ou supprimer`, channel.name);
+    if (action === null) return;
+    if (action.trim().toLowerCase() === 'supprimer') {
+      if (!window.confirm(`Supprimer le salon « ${channel.name} » ?`)) return;
+      const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channel.id)}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const data = await readJsonResponse(response);
+      if (!response.ok) { setMessage(data.message || 'Impossible de supprimer le salon.'); return; }
+      applyServerStructure(data.server.structure);
+      if (activeChannelId === channel.id) navigate(`/server/${selectedServer.id}`);
+      setMessage('Salon supprimé.');
+      return;
+    }
+    if (!action.trim()) return;
+    const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/channels/${encodeURIComponent(channel.id)}`, {
+      method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify({ name: action.trim(), categoryId }),
+    });
     const data = await readJsonResponse(response);
-    if (!response.ok) { setChannelManager((current) => ({ ...current, busy: false, error: data.message || 'Impossible de sauvegarder le salon.' })); return; }
+    if (!response.ok) { setMessage(data.message || 'Impossible de modifier le salon.'); return; }
     applyServerStructure(data.server.structure);
-    setChannelManager({ open: false });
-    setMessage(isCategory ? 'Catégorie créée.' : editing ? 'Salon modifié.' : 'Salon créé.');
+    setMessage('Salon modifié.');
   };
 
   const openProfileModal = async (profileUser = null, isSelfProfile = false) => {
@@ -1864,16 +1755,6 @@ export default function AppHomePage() {
 
   return (
     <div className="tavora-app-shell flex h-screen flex-col overflow-hidden text-white">
-      <div className="pointer-events-none fixed left-4 top-4 z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
-        <AnimatePresence>
-          {privateToasts.map((toast) => (
-            <motion.button key={toast.id} type="button" initial={{ opacity: 0, x: -18, y: -8 }} animate={{ opacity: 1, x: 0, y: 0 }} exit={{ opacity: 0, x: -18 }} onClick={() => { setPrivateToasts((current) => current.filter((item) => item.id !== toast.id)); openDirectMessage(toast.user.id); }} className="pointer-events-auto flex items-center gap-3 rounded-xl border border-cyan-200/20 bg-[#11131b]/95 p-3 text-left shadow-2xl backdrop-blur-xl">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cyan-200/10 text-xs text-cyan-100">{toast.user.avatarUrl ? <img src={toast.user.avatarUrl} alt="" className="h-full w-full object-cover" /> : (toast.user.displayName || 'U').charAt(0).toUpperCase()}</div>
-              <span className="min-w-0"><strong className="block truncate text-sm text-white">{toast.user.displayName}</strong><span className="block truncate text-xs text-white/55">{toast.preview}</span></span>
-            </motion.button>
-          ))}
-        </AnimatePresence>
-      </div>
       <DesktopActivityManager user={user} getAuthHeaders={getAuthHeaders} />
       <GlobalTopBar getAuthHeaders={getAuthHeaders} user={user} userId={user?._id || user?.id} onOpenProfile={(profile) => openProfileModal(profile)} onToggleMobileSidebar={() => setIsMobileSidebarOpen((open) => !open)} />
       <div className="tavora-workspace flex min-h-0 flex-1 overflow-visible">
@@ -1998,9 +1879,7 @@ export default function AppHomePage() {
           onFriendRequestDecision={handleFriendRequestDecision}
           canManageChannels={canManageChannels}
           onCreateChannel={createChannel}
-          onCreateCategory={() => setChannelManager({ open: true, mode: 'category', channel: null, categoryId: '', error: '', busy: false })}
           onEditChannel={editChannel}
-          onDeleteChannel={deleteChannel}
         />
 
         {false ? (
@@ -2155,25 +2034,26 @@ export default function AppHomePage() {
                       className="tavora-message-list relative flex-1 min-h-0 overflow-y-auto px-8 py-5"
                     >
                       {privateMessages.length > 0 ? (
-                        <div className="space-y-1">
-                          {privateMessages.map((msg, index) => {
-                            const grouped = shouldGroupMessage(privateMessages, index);
+                        <div className="space-y-3">
+                          {privateMessages.map((msg) => {
                             return (
-                              <div key={msg._id || `${msg.authorUsername}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, true)} className={`tavora-message group relative px-2 text-sm text-white/70 ${grouped ? 'tavora-message-grouped py-0.5' : 'py-2'}`}>
+                              <div key={msg._id || `${msg.authorUsername}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, true)} className="tavora-message px-2 py-2 text-sm text-white/70">
                                 <div className="flex items-start gap-3">
-                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center">
-                                    {!grouped ? <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-indigo-500/20 text-sm font-semibold text-indigo-300">
-                                      {(msg.authorAvatarUrl || msg.author?.avatarUrl || '') ? <img src={msg.authorAvatarUrl || msg.author?.avatarUrl || ''} alt="avatar" className="h-full w-full object-cover" /> : (msg.authorDisplayName || msg.authorUsername || 'U').charAt(0).toUpperCase()}
-                                    </div> : <span className="pointer-events-none absolute left-0 hidden text-[10px] text-white/25 group-hover:block">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-sm font-semibold text-indigo-300 overflow-hidden">
+                                    {(msg.authorAvatarUrl || msg.author?.avatarUrl || '') ? (
+                                      <img src={msg.authorAvatarUrl || msg.author?.avatarUrl || ''} alt="avatar" className="h-full w-full object-cover" />
+                                    ) : (
+                                      (msg.authorDisplayName || msg.authorUsername || 'U').charAt(0).toUpperCase()
+                                    )}
                                   </div>
                                   <div className="min-w-0 flex-1">
-                                    {!grouped ? <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center justify-between gap-2">
                                       <div>
                                         <span className="inline-flex items-center gap-2 font-medium text-white">{msg.authorDisplayName || msg.authorUsername || 'Utilisateur'}<ProfileBadges badges={msg.authorBadges} compact />{msg.isOfficialMessage ? <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200/75">Message officiel</span> : null}</span>
                                         <p className="text-[11px] text-white/30">@{msg.authorUsername || 'user'}</p>
                                       </div>
                                       <span className="text-[11px] text-white/30">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                    </div> : null}
+                                    </div>
                                     {editingMessageId === msg._id ? <div className="mt-2 flex gap-2"><input autoFocus value={editingMessageDraft} onChange={(event) => setEditingMessageDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') editMessage(); if (event.key === 'Escape') setEditingMessageId(null); }} className="min-w-0 flex-1 rounded-lg bg-black/30 px-2 py-1 text-sm text-white outline-none" /><button type="button" onClick={editMessage} className="text-xs text-cyan-200">Enregistrer</button></div> : <MessageContent content={msg.content} getAuthHeaders={getAuthHeaders} onJoin={handleJoinInvite} />}
                                     {msg.moderationAlert && user?.canModerate ? <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => handleModerationAlert(String(msg.moderationTargetId), 'ignore')} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/60 hover:bg-white/10">Ignorer</button><button type="button" onClick={() => handleModerationAlert(String(msg.moderationTargetId), 'warn')} className="rounded-lg bg-rose-400/15 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-400/25">Envoyer l’avertissement</button><button type="button" onClick={() => handleCopyReviewLink(String(msg.moderationReportId))} className="rounded-lg border border-cyan-200/20 px-3 py-2 text-xs text-cyan-100 hover:bg-cyan-200/10">Copier le lien de vérification</button></div> : null}
                                   </div>
@@ -2299,12 +2179,11 @@ export default function AppHomePage() {
                         >
                           {channelMessages.length > 0 ? (
                             <div className="space-y-1">
-                              {channelMessages.map((msg, index) => {
-                                const grouped = shouldGroupMessage(channelMessages, index);
+                              {channelMessages.map((msg) => {
                                 return (
-                                  <div key={msg._id || `${msg.authorName}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, false)} className={`tavora-message group relative px-2 ${grouped ? 'tavora-message-grouped py-0.5' : 'py-2'}`}>
+                                  <div key={msg._id || `${msg.authorName}-${msg.createdAt}`} onContextMenu={(event) => openMessageContext(event, msg, false)} className="tavora-message px-2 py-2">
                                     <div className="flex items-start gap-3">
-                                      {!grouped ? <button
+                                      <button
                                         type="button"
                                         onClick={() => openProfileModal({ id: msg.authorId, authorId: msg.authorId, username: msg.authorUsername || msg.authorName || 'user', displayName: msg.authorDisplayName || msg.authorName || 'Utilisateur', avatarUrl: msg.authorAvatarUrl || (String(msg.authorId) === String(user?._id || user?.id) ? user?.avatarUrl : '') }, false)}
                                         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-sm font-semibold text-indigo-300 overflow-hidden"
@@ -2314,15 +2193,15 @@ export default function AppHomePage() {
                                         ) : (
                                           (msg.authorDisplayName || msg.authorName || msg.authorUsername || 'U').charAt(0).toUpperCase()
                                         )}
-                                      </button> : <div className="h-10 w-10 shrink-0"><span className="pointer-events-none absolute left-0 hidden text-[10px] text-white/25 group-hover:block">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>}
+                                      </button>
                                       <div className="min-w-0 flex-1">
-                                        {!grouped ? <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center justify-between gap-2">
                                           <div>
                                             <span className="inline-flex items-center gap-2 font-medium text-white">{msg.authorDisplayName || msg.authorName || 'Utilisateur'}<ProfileBadges badges={msg.authorBadges} compact />{msg.isOfficialMessage ? <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-200/75">Message officiel</span> : null}</span>
                                             <p className="text-[11px] text-white/30">@{msg.authorUsername || msg.authorName || 'user'}</p>
                                           </div>
                                           <span className="text-[11px] text-white/30">{new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                        </div> : null}
+                                        </div>
                                         {editingMessageId === msg._id ? <div className="mt-2 flex gap-2"><input autoFocus value={editingMessageDraft} onChange={(event) => setEditingMessageDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') editMessage(); if (event.key === 'Escape') setEditingMessageId(null); }} className="min-w-0 flex-1 rounded-lg bg-black/30 px-2 py-1 text-sm text-white outline-none" /><button type="button" onClick={editMessage} className="text-xs text-cyan-200">Enregistrer</button></div> : <MessageContent content={msg.content} getAuthHeaders={getAuthHeaders} onJoin={handleJoinInvite} />}
                                       </div>
                                     </div>
@@ -2452,19 +2331,6 @@ export default function AppHomePage() {
           )}
         </main>
       </div>
-
-      <ChannelManagerModal
-        open={channelManager.open}
-        mode={channelManager.mode}
-        channel={channelManager.channel}
-        categories={selectedServer?.structure?.categories || []}
-        defaultCategoryId={channelManager.categoryId}
-        busy={channelManager.busy}
-        error={channelManager.error}
-        onClose={() => setChannelManager({ open: false })}
-        onSubmit={saveChannel}
-        onDelete={() => deleteChannel(channelManager.channel)}
-      />
 
       <AnimatePresence>
         {isServerModalOpen && (

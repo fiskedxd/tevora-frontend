@@ -21,6 +21,10 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Checkout backend repository
+        shell: powershell
+        run: git clone https://github.com/fiskedxd/backend-tavora.git backend
+
       - name: Install root dependencies
         run: npm ci
 
@@ -42,7 +46,7 @@ jobs:
         shell: powershell
         run: Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -Name AllowDevelopmentWithoutDevLicense -Type DWord -Value 1
 
-      - name: Build and publish installer
+      - name: Build installer
         run: npm run build -- --publish never
 
       - name: Publish GitHub release
