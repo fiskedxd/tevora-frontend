@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ImagePlus, Save, X } from 'lucide-react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 const authHeaders = (getAuthHeaders) => { const headers = getAuthHeaders?.() || {}; delete headers['Content-Type']; return headers; };
 
 export default function PlaylistEditor({ open, playlist, tracks, getAuthHeaders, onClose, onSaved }) {

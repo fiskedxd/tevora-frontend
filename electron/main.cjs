@@ -24,6 +24,7 @@ function startBackend() {
     env: { ...process.env, PORT: String(PORT), TEVORA_DESKTOP: '1', TEVORA_DATA_DIR: path.join(app.getPath('userData'), 'data') },
     silent: true,
   });
+  backendProcess.stdout?.on('data', (data) => console.log(`[backend] ${data}`));
   backendProcess.stderr?.on('data', (data) => console.error(`[backend] ${data}`));
   backendProcess.on('error', (error) => console.error('Backend startup failed:', error));
   backendProcess.on('exit', (code) => {
@@ -43,12 +44,20 @@ async function createWindow() {
     icon: path.join(__dirname, '..', 'frontend', 'public', 'favicon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false },
   });
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'i') {
+      event.preventDefault();
+      window.webContents.toggleDevTools();
+    }
+  });
   const isDevelopment = process.argv.includes('--dev');
+  const pageStartedAt = Date.now();
   if (isDevelopment) {
     await window.loadURL('http://localhost:5173');
   } else {
     await window.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
   }
+  console.log(`[window] page loaded in ${Date.now() - pageStartedAt}ms (${isDevelopment ? 'dev server' : 'production build'})`);
   return window;
 }
 

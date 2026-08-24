@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AppWindow, Ban, CalendarDays, Camera, Code2, Flag, Gamepad2, Globe2, MessageCircle, MoreHorizontal, Music2, User, UserMinus, UserPlus, X } from 'lucide-react';
 import ProfileBadges from './ProfileBadges';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 
 export default function ProfileModal({
   profileTarget,

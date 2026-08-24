@@ -6,7 +6,7 @@ import PlaylistEditor from './PlaylistEditor';
 import PlaylistDetailOverlay from './PlaylistDetailOverlay';
 import WindowControls from './WindowControls';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 
 const readableTitle = (file) => file.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim() || file;
 const formatTime = (value) => {

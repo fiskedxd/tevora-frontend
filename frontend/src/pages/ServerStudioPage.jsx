@@ -4,7 +4,7 @@ import { ArrowLeft, LoaderCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import ServerBannerEditor from '../components/ServerBannerEditor';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 
 export default function ServerStudioPage() {
   const { serverId } = useParams();

@@ -26,7 +26,13 @@ import {
   Mic, MicOff, Video, VideoOff, Radio
 } from 'lucide-react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
+console.info('[app] API URL:', API_URL);
+const socialCache = new Map();
+const messageCache = new Map();
+const memberCache = new Map();
+const readSessionCache = (key) => { try { return JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { return null; } };
+const writeSessionCache = (key, value) => { try { sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* Storage may be unavailable. */ } };
 
 const buildDefaultServerStructure = (server) => {
   const baseId = String(server.id || server.name || 'server').toLowerCase().replace(/\s+/g, '-');
@@ -475,12 +481,27 @@ export default function AppHomePage() {
     const loadSocial = async () => {
       if (loading) return;
       loading = true;
+      const startedAt = performance.now();
       try {
+        const socialKey = String(user?._id || user?.id);
+        const cached = socialCache.get(socialKey) || readSessionCache(`tavora:social:${socialKey}`);
+        if (cached && !cancelled) {
+          console.info('[social] cache displayed', { servers: cached.servers?.length || 0, friends: cached.friends?.length || 0 });
+          setServers(cached.servers || []);
+          setFriends(cached.friends || []);
+          setIncomingRequests(cached.incomingRequests || []);
+          setOutgoingRequests(cached.outgoingRequests || []);
+        }
+        console.info('[social] loading /api/social/me');
         const response = await fetch(`${API_URL}/api/social/me`, { headers: getAuthHeaders() });
         const data = await readJsonResponse(response);
         if (!response.ok) throw new Error(data.message || 'Impossible de charger la vue sociale.');
         if (cancelled) return;
         const nextServers = (data.servers || []).map(normalizeServer);
+        const nextSocial = { servers: nextServers, friends: data.friends || [], incomingRequests: data.incomingRequests || [], outgoingRequests: data.outgoingRequests || [] };
+        console.info('[social] loaded', { servers: nextServers.length, friends: nextSocial.friends.length, durationMs: Math.round(performance.now() - startedAt) });
+        socialCache.set(socialKey, nextSocial);
+        writeSessionCache(`tavora:social:${socialKey}`, nextSocial);
         setServers((current) => JSON.stringify(current) === JSON.stringify(nextServers) ? current : nextServers);
         setFriends((current) => JSON.stringify(current) === JSON.stringify(data.friends || []) ? current : (data.friends || []));
         setIncomingRequests((current) => JSON.stringify(current) === JSON.stringify(data.incomingRequests || []) ? current : (data.incomingRequests || []));
@@ -491,7 +512,7 @@ export default function AppHomePage() {
           if (userChanged) updateUser(nextUser);
         }
       } catch (error) {
-        console.error('Social data loading failed:', error);
+        console.error('[social] loading failed', { durationMs: Math.round(performance.now() - startedAt), error });
         setMessage(error.message || 'Impossible de charger les amis et les serveurs.');
       } finally {
         loading = false;
@@ -526,7 +547,7 @@ export default function AppHomePage() {
       }
     };
     loadNotifications();
-    const intervalId = window.setInterval(loadNotifications, 1500);
+    const intervalId = window.setInterval(loadNotifications, 10000);
     return () => { cancelled = true; window.clearInterval(intervalId); };
   }, [getAuthHeaders, user?._id || user?.id]);
 
@@ -599,10 +620,16 @@ export default function AppHomePage() {
   useEffect(() => {
     const loadMembers = async () => {
       if (!selectedServer?.id) {
-        setServerMembers([]);
         return;
       }
       try {
+        const memberKey = String(selectedServer.id);
+        const cached = memberCache.get(memberKey) || readSessionCache(`tavora:members:${memberKey}`);
+        if (cached) {
+          setServerMembers(cached.members || []);
+          setServerRoles(cached.roles || []);
+          setServerPermissions(cached.permissions || []);
+        }
         const [rolesResponse, membersResponse] = await Promise.all([
           fetch(`${API_URL}/api/social/servers/${selectedServer.id}/roles`, { headers: getAuthHeaders() }),
           fetch(`${API_URL}/api/social/servers/${selectedServer.id}/members`, { headers: getAuthHeaders() }),
@@ -615,12 +642,15 @@ export default function AppHomePage() {
         const membersData = await readJsonResponse(membersResponse);
         if (membersResponse.ok) {
           setServerMembers(membersData.members || []);
+          const nextMembers = { members: membersData.members || [], roles: rolesData.roles || [], permissions: rolesData.permissions || [] };
+          memberCache.set(memberKey, nextMembers);
+          writeSessionCache(`tavora:members:${memberKey}`, nextMembers);
         } else {
-          setServerMembers([]);
+          if (!cached) setServerMembers([]);
         }
       } catch (error) {
         console.error(error);
-        setServerMembers([]);
+        if (!memberCache.has(String(selectedServer?.id))) setServerMembers((current) => current);
       }
     };
     loadMembers();
@@ -632,18 +662,22 @@ export default function AppHomePage() {
     const loadMessages = async (reset = false) => {
       if (loading) return;
       if (!selectedServer?.id || !activeChannelId || activeChannel?.type !== 'text') {
-        setChannelMessages([]);
         return;
       }
       loading = true;
-      if (reset) setChannelMessages([]);
+      const messageKey = `${selectedServer.id}:${activeChannelId}`;
+      const cached = messageCache.get(messageKey) || readSessionCache(`tavora:messages:${messageKey}`);
+      if (cached) setChannelMessages(cached);
       try {
         const response = await fetch(`${API_URL}/api/social/servers/${selectedServer.id}/messages/${activeChannelId}`, {
           headers: getAuthHeaders(),
         });
         const data = await readJsonResponse(response);
         if (response.ok && !cancelled) {
-          setChannelMessages(data.messages || []);
+          const nextMessages = data.messages || [];
+          messageCache.set(messageKey, nextMessages);
+          writeSessionCache(`tavora:messages:${messageKey}`, nextMessages);
+          setChannelMessages(nextMessages);
         }
       } catch (error) {
         console.error(error);
@@ -652,7 +686,7 @@ export default function AppHomePage() {
       }
     };
     loadMessages(true);
-    const intervalId = window.setInterval(loadMessages, 1500);
+    const intervalId = window.setInterval(loadMessages, 5000);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
@@ -1017,12 +1051,16 @@ export default function AppHomePage() {
     }
 
     let cancelled = false;
-    setSelectedServer(null);
-    setPrivateChatUser(null);
-    setPrivateMessages([]);
     setPrivateDraft('');
     setProfileMessage('');
     setIsLoadingPrivateChat(true);
+    const privateCacheKey = `dm:${targetUserId}`;
+    const cachedPrivate = messageCache.get(privateCacheKey) || readSessionCache(`tavora:dm:${targetUserId}`);
+    if (cachedPrivate) {
+      setPrivateChatUser(cachedPrivate.user || null);
+      setPrivateMessages(cachedPrivate.messages || []);
+      setIsLoadingPrivateChat(false);
+    }
 
     const loadPrivateChat = async () => {
       try {
@@ -1037,6 +1075,9 @@ export default function AppHomePage() {
         if (cancelled) return;
         setPrivateChatUser(profileData.user || messagesData.friend || { id: targetUserId });
         setPrivateMessages(messagesData.messages || []);
+        const nextPrivate = { user: profileData.user || messagesData.friend || { id: targetUserId }, messages: messagesData.messages || [] };
+        messageCache.set(privateCacheKey, nextPrivate);
+        writeSessionCache(`tavora:dm:${targetUserId}`, nextPrivate);
       } catch (error) {
         if (!cancelled) {
           setPrivateChatUser(null);
@@ -1078,7 +1119,7 @@ export default function AppHomePage() {
         loading = false;
       }
     };
-    const intervalId = window.setInterval(syncPrivateMessages, 1500);
+    const intervalId = window.setInterval(syncPrivateMessages, 5000);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Bell, Check, ChevronRight, Image, Lock, Palette, Save, Search, Server, Shield, SlidersHorizontal, User, Users, Volume2, X, Zap } from 'lucide-react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 const navGroups = [
   { title: 'Compte', icon: User, items: [['account', 'Infos du compte'], ['security', 'Mot de passe et sécurité'], ['voice', 'Voix & Vidéo']] },
   { title: 'Profil', icon: Image, items: [['profile', 'Profil'], ['status', 'Statut personnalisé']] },

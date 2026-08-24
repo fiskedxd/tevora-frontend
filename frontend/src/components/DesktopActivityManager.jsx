@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 const HEARTBEAT_MS = 30000;
 
 export default function DesktopActivityManager({ user, getAuthHeaders }) {

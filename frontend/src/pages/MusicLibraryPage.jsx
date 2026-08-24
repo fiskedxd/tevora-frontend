@@ -4,7 +4,7 @@ import { Link, NavLink } from 'react-router-dom';
 import GlobalTopBar from '../components/GlobalTopBar';
 import { useAuth } from '../contexts/AuthContext';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 const titleFor = (track) => track.title || track.filename?.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Musique';
 
 export default function MusicLibraryPage({ mode = 'music' }) {

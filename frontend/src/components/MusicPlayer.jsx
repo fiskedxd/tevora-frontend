@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, CirclePlus, ListMusic, Music2, Pause, Play, Repeat, Shuffle, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://backend-tavora.fly.dev');
 const AUDIO_STORAGE_KEY = 'tavora-audio-session';
 const titleFor = (track) => track?.title || track?.filename?.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Musique';
 const timeFor = (value) => Number.isFinite(value) ? `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}` : '--:--';
